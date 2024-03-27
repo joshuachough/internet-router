@@ -1,3 +1,6 @@
+import sys
+sys.path.append("/home/joshua/p4app/docker/scripts")
+
 from p4app import P4Mininet
 
 from controller import MacLearningController
