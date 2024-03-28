@@ -7,6 +7,7 @@ import time
 
 ARP_OP_REQ   = 0x0001
 ARP_OP_REPLY = 0x0002
+TYPE_IPV6    = 0x86dd
 
 class MacLearningController(Thread):
     def __init__(self, sw, start_wait=0.3):
@@ -36,7 +37,11 @@ class MacLearningController(Thread):
         self.send(pkt)
 
     def handlePkt(self, pkt):
-        #pkt.show2()
+        # pkt.show2()
+
+        # Ignore IPv6 packets:
+        if Ether in pkt and pkt[Ether].type == TYPE_IPV6: return
+
         assert CPUMetadata in pkt, "Should only receive packets from switch with special header"
 
         # Ignore packets that the CPU sends:
