@@ -1,6 +1,8 @@
 .PHONY: all load clean
 
-all: clean load
+all: clean load run
+
+run:
 	sudo -s ~/p4app/docker/scripts/run.sh
 
 load:
