@@ -10,7 +10,7 @@ from my_topo import SingleSwitchTopo
 N = 3
 
 topo = SingleSwitchTopo(N)
-net = P4Mininet(program="l2switch.p4", topo=topo, auto_arp=False)
+net = P4Mininet(program="router.p4", topo=topo, auto_arp=False)
 net.start()
 
 # Add a mcast group for all ports (except for the CPU port)
