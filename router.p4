@@ -5,7 +5,6 @@
 typedef bit<9>  port_t;
 typedef bit<48> macAddr_t;
 typedef bit<32> ip4Addr_t;
-typedef bit<16> mcastGrp_t;
 
 const port_t CPU_PORT           = 0x1;
 
@@ -14,7 +13,6 @@ const bit<16> ARP_OP_REPLY      = 0x0002;
 
 const bit<16> TYPE_ARP          = 0x0806;
 const bit<16> TYPE_CPU_METADATA = 0x080a;
-
 
 header ethernet_t {
     macAddr_t dstAddr;
@@ -26,6 +24,8 @@ header cpu_metadata_t {
     bit<8> fromCpu;
     bit<16> origEtherType;
     bit<16> srcPort;
+    bit<8> forward;
+    bit<16> egressPort;
 }
 
 header arp_t {
@@ -47,7 +47,9 @@ struct headers {
     arp_t             arp;
 }
 
-struct metadata { }
+struct metadata {
+    bit<1> routed;
+}
 
 parser MyParser(packet_in packet,
                 out headers hdr,
@@ -94,10 +96,7 @@ control MyIngress(inout headers hdr,
 
     action set_egr(port_t port) {
         standard_metadata.egress_spec = port;
-    }
-
-    action set_mgid(mcastGrp_t mgid) {
-        standard_metadata.mcast_grp = mgid;
+        meta.routed = 1;
     }
 
     action cpu_meta_encap() {
@@ -117,31 +116,18 @@ control MyIngress(inout headers hdr,
         standard_metadata.egress_spec = CPU_PORT;
     }
 
-    table fwd_l2 {
-        key = {
-            hdr.ethernet.dstAddr: exact;
-        }
-        actions = {
-            set_egr;
-            set_mgid;
-            drop;
-            NoAction;
-        }
-        size = 1024;
-        default_action = drop();
-    }
-
-
     apply {
+        meta.routed = 0;
 
-        if (standard_metadata.ingress_port == CPU_PORT)
+        if (standard_metadata.ingress_port == CPU_PORT) {
+            if (hdr.cpu_metadata.isValid() && hdr.cpu_metadata.forward == 1)
+                set_egr((bit<9>)hdr.cpu_metadata.egressPort);
             cpu_meta_decap();
-
-        if (hdr.arp.isValid() && standard_metadata.ingress_port != CPU_PORT) {
-            send_to_cpu();
         }
-        else if (hdr.ethernet.isValid()) {
-            fwd_l2.apply();
+        if (meta.routed == 0) {
+            if (hdr.arp.isValid() && standard_metadata.ingress_port != CPU_PORT) {
+                send_to_cpu();
+            }
         }
 
     }
