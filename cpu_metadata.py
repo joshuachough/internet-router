@@ -1,4 +1,4 @@
-from scapy.fields import BitField, ByteField, ShortField, IntField
+from scapy.fields import BitField, ByteField, ShortField, IPField
 from scapy.packet import Packet, bind_layers
 from scapy.layers.inet import IP
 from scapy.layers.l2 import Ether, ARP
@@ -12,7 +12,7 @@ class CPUMetadata(Packet):
                     ShortField("srcPort", None),
                     ByteField("forward", 0),
                     ShortField("egressPort", None),
-                    IntField("nextHop", 0)]
+                    IPField("nextHop", 0)]
 
 bind_layers(Ether, CPUMetadata, type=TYPE_CPU_METADATA)
 bind_layers(CPUMetadata, IP, origEtherType=0x0800)

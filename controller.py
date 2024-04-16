@@ -31,47 +31,56 @@ class RouterController(Thread):
     def addIpAddr(self, ip, mac):
         # Don't re-add the ip-mac mapping if we already have it:
         if ip in self.mac_for_ip: return
+        srcAddr = self.sw.intfs[self.port_for_mac[mac]].MAC()
         self.sw.insertTableEntry(table_name='MyIngress.arp',
                 match_fields={'meta.nextHop': [ip]},
                 action_name='MyIngress.ipv4_forward',
-                action_params={'dstAddr': mac})
+                action_params={'dstAddr': mac, 'srcAddr': srcAddr})
         self.mac_for_ip[ip] = mac
 
     def handleArpReply(self, pkt):
         self.addMacAddr(pkt[ARP].hwsrc, pkt[CPUMetadata].srcPort)
         self.addIpAddr(pkt[ARP].psrc, pkt[ARP].hwsrc)
         # Send any packets that were waiting on this ARP resolution
-        if pkt[ARP].hwdst == self.sw.intfs[1].MAC():
+        if pkt[ARP].hwdst == self.sw.intfs[pkt[CPUMetadata].srcPort].MAC():
             for p in self.arp_pending_buffer.copy():
                 if p[CPUMetadata].nextHop == pkt[ARP].psrc:
                     self.send(p)
                     self.arp_pending_buffer.remove(p)
-        pkt[CPUMetadata].forward = 1
-        pkt[CPUMetadata].egressPort = self.port_for_mac[pkt[ARP].hwdst]
-        self.send(pkt)
 
     def handleArpRequest(self, pkt):
-        # Only cache routing information for packets that will be forwarded
-        if pkt[CPUMetadata].srcPort != 1:
-            self.addMacAddr(pkt[ARP].hwsrc, pkt[CPUMetadata].srcPort)
-            self.addIpAddr(pkt[ARP].psrc, pkt[ARP].hwsrc)
-        for i in range(2, len(self.sw.intfs)):
-            if i == pkt[CPUMetadata].srcPort: continue
-            copy = pkt.copy()
-            copy[CPUMetadata].forward = 1
-            copy[CPUMetadata].egressPort = i
-            self.send(copy)
+        self.addMacAddr(pkt[ARP].hwsrc, pkt[CPUMetadata].srcPort)
+        self.addIpAddr(pkt[ARP].psrc, pkt[ARP].hwsrc)
+        self.createArpReply(pkt)
 
-    def createArpRequest(self, destIp):
-        pkt = Ether(dst='ff:ff:ff:ff:ff:ff', type=TYPE_ARP) / ARP(
+    def createArpRequest(self, pkt):
+        destIp, srcIp, srcPort = pkt[CPUMetadata].nextHop, pkt[IP].src, pkt[CPUMetadata].srcPort
+        for i in range(2, len(self.sw.intfs)):
+            if i == srcPort: continue
+            srcAddr = self.sw.intfs[i].MAC()
+            pkt = Ether(dst='ff:ff:ff:ff:ff:ff', src=srcAddr, type=TYPE_CPU_METADATA) / CPUMetadata(origEtherType=TYPE_ARP, srcPort=1, forward=1, egressPort=i) / ARP(
                 op=ARP_OP_REQ,
-                hwsrc=self.sw.intfs[1].MAC(),
-                psrc=self.sw.intfs[1].IP(),
+                hwsrc=srcAddr,
+                psrc=srcIp,
                 hwdst='00:00:00:00:00:00',
                 pdst=destIp)
-        pkt[CPUMetadata].origEtherType = TYPE_ARP
-        pkt[CPUMetadata].srcPort = 1
-        self.handleArpRequest(pkt)
+            self.send(pkt)
+
+    def createArpReply(self, pkt):
+        routerPortMac = self.sw.intfs[pkt[CPUMetadata].srcPort].MAC()
+        reply = pkt.copy()
+        reply[ARP].op = ARP_OP_REPLY
+        reply[ARP].hwdst = pkt[ARP].hwsrc
+        reply[ARP].pdst = pkt[ARP].psrc
+        reply[ARP].hwsrc = routerPortMac
+        reply[ARP].psrc = pkt[ARP].pdst
+        reply[CPUMetadata].origEtherType = TYPE_ARP
+        reply[CPUMetadata].srcPort = 1
+        reply[CPUMetadata].forward = 1
+        reply[CPUMetadata].egressPort = pkt[CPUMetadata].srcPort
+        reply[Ether].dst = pkt[Ether].src
+        reply[Ether].src = routerPortMac
+        self.send(reply)
 
     def handlePkt(self, pkt):
         # Ignore IPv6 packets:
@@ -92,7 +101,7 @@ class RouterController(Thread):
         elif pkt[CPUMetadata].origEtherType == TYPE_IPV4 and IP in pkt:
             if pkt[CPUMetadata].nextHop != 0:
                 self.arp_pending_buffer.append(pkt)
-                self.createArpRequest(pkt[CPUMetadata].nextHop)
+                self.createArpRequest(pkt)
 
     def send(self, *args, **override_kwargs):
         pkt = args[0]

@@ -2,6 +2,7 @@ import sys
 sys.path.append("/home/joshua/p4app/docker/scripts")
 
 from p4app import P4Mininet
+from mininet.cli import CLI
 
 from controller import RouterController
 from my_topo import SingleSwitchTopo
@@ -29,11 +30,14 @@ for i in range(2, N + 1):
 cpu = RouterController(sw)
 cpu.start()
 
+# CLI(net)
+
 h2, h3 = net.get("h2"), net.get("h3")
 
-print(h2.cmd("arping -c1 10.0.0.3"))
+# print(h2.cmd("arping -c1 10.0.0.3"))
 
-print(h3.cmd("ping -c1 10.0.0.2"))
+for i in range(5):
+    print(h3.cmd("ping -c1 10.0.0.2"))
 
 # These table entries were added by the CPU:
 sw.printTableEntries()
