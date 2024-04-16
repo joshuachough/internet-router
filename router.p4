@@ -213,6 +213,9 @@ control MyIngress(inout headers hdr,
                 send_to_cpu();
             }
             else if (hdr.ipv4.isValid()) {
+                if (hdr.ipv4.ttl == 0)
+                    drop();
+
                 routing.apply();
                 if (meta.nextHop != 0)
                     arp.apply();
