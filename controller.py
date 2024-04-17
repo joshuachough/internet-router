@@ -7,6 +7,7 @@ import time
 
 ARP_OP_REQ = 0x0001
 ARP_OP_REPLY = 0x0002
+
 TYPE_ARP = 0x0806
 TYPE_CPU_METADATA = 0x080a
 TYPE_IPV4 = 0x0800
@@ -16,6 +17,11 @@ TYPE_LOCAL_IP = 0x000b
 TYPE_ROUTER_MISS = 0x000c
 TYPE_ARP_MISS = 0x000d
 TYPE_PWOSPF = 0x000e
+
+NUM_COUNTERS = 3
+ARP_COUNTER = 0
+IP_COUNTER = 1
+CTRL_COUNTER = 2
 
 class RouterController(Thread):
     def __init__(self, sw, start_wait=0.3):

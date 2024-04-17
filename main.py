@@ -7,6 +7,11 @@ from mininet.cli import CLI
 from controller import RouterController
 from my_topo import SingleSwitchTopo
 
+NUM_COUNTERS = 3
+ARP_COUNTER = 0
+IP_COUNTER = 1
+CTRL_COUNTER = 2
+
 # Add three hosts. Port 1 (h1) is reserved for the CPU.
 N = 3
 
@@ -40,3 +45,12 @@ print(h3.cmd("ping -c1 10.0.0.2"))
 
 # These table entries were added by the CPU:
 sw.printTableEntries()
+
+# # Print counters
+# print('\n----- Printing counters -----')
+# packet_count, byte_count = sw.readCounter('counters', ARP_COUNTER)
+# print("ARP_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
+# packet_count, byte_count = sw.readCounter('counters', IP_COUNTER)
+# print("IP_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
+# packet_count, byte_count = sw.readCounter('counters', CTRL_COUNTER)
+# print("CTRL_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))

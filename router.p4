@@ -20,6 +20,11 @@ const bit<16> TYPE_ROUTER_MISS  = 0x000c;
 const bit<16> TYPE_ARP_MISS     = 0x000d;
 const bit<16> TYPE_PWOSPF       = 0x000e;
 
+const bit<32> NUM_COUNTERS      = 3;
+const bit<32> ARP_COUNTER       = 0;
+const bit<32> IP_COUNTER        = 1;
+const bit<32> CTRL_COUNTER      = 2;
+
 header ethernet_t {
     macAddr_t dstAddr;
     macAddr_t srcAddr;
@@ -136,6 +141,8 @@ control MyIngress(inout headers hdr,
                   inout metadata meta,
                   inout standard_metadata_t standard_metadata) {
 
+    counter(NUM_COUNTERS, CounterType.packets_and_bytes) counters;
+
     action drop() {
         mark_to_drop(standard_metadata);
     }
@@ -161,6 +168,7 @@ control MyIngress(inout headers hdr,
         cpu_meta_encap();
         standard_metadata.egress_spec = CPU_PORT;
         hdr.cpu_metadata.type = type;
+        counters.count(CTRL_COUNTER);
     }
 
     // Set the next hop ip address (and port) and apply the ARP table to get the MAC address
@@ -174,6 +182,7 @@ control MyIngress(inout headers hdr,
         hdr.ethernet.srcAddr = srcAddr;
         hdr.ethernet.dstAddr = dstAddr;
         hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
+        counters.count(IP_COUNTER);
     }
 
     // On routing table miss, send the packet to the CPU
@@ -221,6 +230,7 @@ control MyIngress(inout headers hdr,
         }
         if (meta.routed == 0) {
             if (hdr.arp.isValid() && standard_metadata.ingress_port != CPU_PORT) {
+                counters.count(ARP_COUNTER);
                 send_to_cpu(TYPE_ARP);
             }
             else if (hdr.ipv4.isValid()) {
