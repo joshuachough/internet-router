@@ -14,6 +14,11 @@ const bit<16> ARP_OP_REPLY      = 0x0002;
 const bit<16> TYPE_ARP          = 0x0806;
 const bit<16> TYPE_CPU_METADATA = 0x080a;
 const bit<16> TYPE_IPV4         = 0x0800;
+const bit<16> TYPE_UNKNOWN      = 0x000a;
+const bit<16> TYPE_LOCAL_IP     = 0x000b;
+const bit<16> TYPE_ROUTER_MISS  = 0x000c;
+const bit<16> TYPE_ARP_MISS     = 0x000d;
+const bit<16> TYPE_PWOSPF       = 0x000e;
 
 header ethernet_t {
     macAddr_t dstAddr;
@@ -28,6 +33,7 @@ header cpu_metadata_t {
     bit<8> forward;
     bit<16> egressPort;
     ip4Addr_t nextHop;
+    bit<16> type;
 }
 
 header arp_t {
@@ -151,9 +157,10 @@ control MyIngress(inout headers hdr,
         hdr.cpu_metadata.setInvalid();
     }
 
-    action send_to_cpu() {
+    action send_to_cpu(bit<16> type) {
         cpu_meta_encap();
         standard_metadata.egress_spec = CPU_PORT;
+        hdr.cpu_metadata.type = type;
     }
 
     // Set the next hop ip address (and port) and apply the ARP table to get the MAC address
@@ -169,9 +176,14 @@ control MyIngress(inout headers hdr,
         hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
     }
 
+    // On routing table miss, send the packet to the CPU
+    action routing_miss() {
+        send_to_cpu(TYPE_ROUTER_MISS);
+    }
+
     // On arp table miss, send the packet to the CPU
     action arp_miss() {
-        send_to_cpu();
+        send_to_cpu(TYPE_ARP_MISS);
         hdr.cpu_metadata.nextHop = meta.nextHop;
     }
     
@@ -181,11 +193,10 @@ control MyIngress(inout headers hdr,
         }
         actions = {
             next_hop;
-            drop;
-            NoAction;
+            routing_miss;
         }
         size = 1024;
-        default_action = drop();
+        default_action = routing_miss();
     }
 
     table arp {
@@ -210,7 +221,7 @@ control MyIngress(inout headers hdr,
         }
         if (meta.routed == 0) {
             if (hdr.arp.isValid() && standard_metadata.ingress_port != CPU_PORT) {
-                send_to_cpu();
+                send_to_cpu(TYPE_ARP);
             }
             else if (hdr.ipv4.isValid()) {
                 if (hdr.ipv4.ttl == 0)
@@ -219,6 +230,9 @@ control MyIngress(inout headers hdr,
                 routing.apply();
                 if (meta.nextHop != 0)
                     arp.apply();
+            }
+            else {
+                send_to_cpu(TYPE_UNKNOWN);
             }
         }
 

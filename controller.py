@@ -11,6 +11,11 @@ TYPE_ARP = 0x0806
 TYPE_CPU_METADATA = 0x080a
 TYPE_IPV4 = 0x0800
 TYPE_IPV6 = 0x86dd
+TYPE_UNKNOWN = 0x000a
+TYPE_LOCAL_IP = 0x000b
+TYPE_ROUTER_MISS = 0x000c
+TYPE_ARP_MISS = 0x000d
+TYPE_PWOSPF = 0x000e
 
 class RouterController(Thread):
     def __init__(self, sw, start_wait=0.3):
@@ -93,15 +98,26 @@ class RouterController(Thread):
         # Ignore packets that the CPU sends:
         if pkt[CPUMetadata].fromCpu == 1: return
 
-        if pkt[CPUMetadata].origEtherType == TYPE_ARP and ARP in pkt:
+        if pkt[CPUMetadata].type == TYPE_ARP and ARP in pkt:
             if pkt[ARP].op == ARP_OP_REQ:
                 self.handleArpRequest(pkt)
             elif pkt[ARP].op == ARP_OP_REPLY:
                 self.handleArpReply(pkt)
-        elif pkt[CPUMetadata].origEtherType == TYPE_IPV4 and IP in pkt:
-            if pkt[CPUMetadata].nextHop != 0:
-                self.arp_pending_buffer.append(pkt)
-                self.createArpRequest(pkt)
+        elif IP in pkt:
+            if pkt[CPUMetadata].type == TYPE_ARP_MISS:
+                if pkt[CPUMetadata].nextHop != '0.0.0.0':
+                    self.arp_pending_buffer.append(pkt)
+                    self.createArpRequest(pkt)
+                else:
+                    print('#Error: Missing next hop')
+            elif pkt[CPUMetadata].type == TYPE_ROUTER_MISS:
+                print('#Warning: Packet missed routing table')
+            elif pkt[CPUMetadata].type == TYPE_LOCAL_IP:
+                # TODO: Handle packets for local IP
+                print('Packet for local IP')
+            elif pkt[CPUMetadata].type == TYPE_PWOSPF:
+                # TODO: Handle packets for PWOSPF
+                print('Packet for PWOSPF')
 
     def send(self, *args, **override_kwargs):
         pkt = args[0]
