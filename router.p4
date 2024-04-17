@@ -15,10 +15,10 @@ const bit<16> TYPE_ARP          = 0x0806;
 const bit<16> TYPE_CPU_METADATA = 0x080a;
 const bit<16> TYPE_IPV4         = 0x0800;
 const bit<16> TYPE_UNKNOWN      = 0x000a;
-const bit<16> TYPE_LOCAL_IP     = 0x000b;
-const bit<16> TYPE_ROUTER_MISS  = 0x000c;
-const bit<16> TYPE_ARP_MISS     = 0x000d;
-const bit<16> TYPE_PWOSPF       = 0x000e;
+const bit<16> TYPE_ROUTER_MISS  = 0x000b;
+const bit<16> TYPE_ARP_MISS     = 0x000c;
+const bit<16> TYPE_PWOSPF_HELLO = 0x000d;
+const bit<16> TYPE_PWOSPF_LSU   = 0x000e;
 
 const bit<32> NUM_COUNTERS      = 3;
 const bit<32> ARP_COUNTER       = 0;
@@ -220,6 +220,18 @@ control MyIngress(inout headers hdr,
         default_action = arp_miss();
     }
 
+    table local {
+        key = {
+            hdr.ipv4.dstAddr: exact;
+        }
+        actions = {
+            send_to_cpu;
+            NoAction;
+        }
+        size = 1024; 
+        default_action = NoAction;
+    }
+
     apply {
         meta.routed = 0;
 
@@ -237,9 +249,11 @@ control MyIngress(inout headers hdr,
                 if (hdr.ipv4.ttl == 0)
                     drop();
 
-                routing.apply();
-                if (meta.nextHop != 0)
-                    arp.apply();
+                if (local.apply().miss) {
+                    if (routing.apply().hit) {
+                        arp.apply();
+                    }
+                }
             }
             else {
                 send_to_cpu(TYPE_UNKNOWN);

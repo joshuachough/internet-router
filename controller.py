@@ -13,10 +13,10 @@ TYPE_CPU_METADATA = 0x080a
 TYPE_IPV4 = 0x0800
 TYPE_IPV6 = 0x86dd
 TYPE_UNKNOWN = 0x000a
-TYPE_LOCAL_IP = 0x000b
-TYPE_ROUTER_MISS = 0x000c
-TYPE_ARP_MISS = 0x000d
-TYPE_PWOSPF = 0x000e
+TYPE_ROUTER_MISS = 0x000b
+TYPE_ARP_MISS = 0x000c
+TYPE_PWOSPF_HELLO = 0x000d
+TYPE_PWOSPF_LSU = 0x000e
 
 NUM_COUNTERS = 3
 ARP_COUNTER = 0
@@ -118,12 +118,12 @@ class RouterController(Thread):
                     print('#Error: Missing next hop')
             elif pkt[CPUMetadata].type == TYPE_ROUTER_MISS:
                 print('#Warning: Packet missed routing table')
-            elif pkt[CPUMetadata].type == TYPE_LOCAL_IP:
-                # TODO: Handle packets for local IP
-                print('Packet for local IP')
-            elif pkt[CPUMetadata].type == TYPE_PWOSPF:
-                # TODO: Handle packets for PWOSPF
-                print('Packet for PWOSPF')
+            elif pkt[CPUMetadata].type == TYPE_PWOSPF_HELLO:
+                # TODO: Handle packets for PWOSPF HELLO
+                print('Packet for PWOSPF HELLO')
+            elif pkt[CPUMetadata].type == TYPE_PWOSPF_LSU:
+                # TODO: Handle packets for PWOSPF LSU
+                print('Packet for PWOSPF LSU')
 
     def send(self, *args, **override_kwargs):
         pkt = args[0]
