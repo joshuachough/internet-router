@@ -6,6 +6,7 @@ from mininet.cli import CLI
 
 from controller import RouterController
 from my_topo import SingleSwitchTopo
+from tables import RoutingTableEntry, LocalTableEntry
 
 TYPE_PWOSPF_HELLO = 0x000d
 TYPE_PWOSPF_LSU = 0x000e
@@ -26,27 +27,11 @@ sw = net.get("s1")
 
 # Add next-hop rules
 for i in range(2, N + 1):
-    sw.insertTableEntry(
-        table_name="MyIngress.routing",
-        match_fields={"hdr.ipv4.dstAddr": ["10.0.0.%d" % i, 0xffffffff]},
-        action_name="MyIngress.next_hop",
-        action_params={"dstAddr": "10.0.0.%d" % i, "port": i},
-        priority=i
-    )
+    sw.insertTableEntry(**RoutingTableEntry(keyIP="10.0.0.%d" % i, dstIP="10.0.0.%d" % i, port=i, priority=i))
 
 # Add local IP rules
-sw.insertTableEntry(
-    table_name="MyIngress.local",
-    match_fields={"hdr.ipv4.dstAddr": ["224.0.0.5"]},
-    action_name="MyIngress.send_to_cpu",
-    action_params={"type": TYPE_PWOSPF_HELLO}
-)
-sw.insertTableEntry(
-    table_name="MyIngress.local",
-    match_fields={"hdr.ipv4.dstAddr": ["10.0.0.1"]},
-    action_name="MyIngress.send_to_cpu",
-    action_params={"type": TYPE_PWOSPF_LSU}
-)
+sw.insertTableEntry(**LocalTableEntry(dstIP="224.0.0.5", t=TYPE_PWOSPF_HELLO))
+sw.insertTableEntry(**LocalTableEntry(dstIP="10.0.0.1", t=TYPE_PWOSPF_LSU))
 
 # Start the router controller
 cpu = RouterController(sw)

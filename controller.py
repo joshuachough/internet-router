@@ -3,6 +3,7 @@ from scapy.all import sendp
 from scapy.all import Packet, Ether, IP, ARP
 from async_sniff import sniff
 from cpu_metadata import CPUMetadata
+from tables import ArpTableEntry
 import time
 
 ARP_OP_REQ = 0x0001
@@ -43,10 +44,7 @@ class RouterController(Thread):
         # Don't re-add the ip-mac mapping if we already have it:
         if ip in self.mac_for_ip: return
         srcAddr = self.sw.intfs[self.port_for_mac[mac]].MAC()
-        self.sw.insertTableEntry(table_name='MyIngress.arp',
-                match_fields={'meta.nextHop': [ip]},
-                action_name='MyIngress.ipv4_forward',
-                action_params={'dstAddr': mac, 'srcAddr': srcAddr})
+        self.sw.insertTableEntry(**ArpTableEntry(nextHopIP=ip, srcMAC=srcAddr, dstMAC=mac))
         self.mac_for_ip[ip] = mac
 
     def handleArpReply(self, pkt):
