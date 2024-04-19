@@ -1,6 +1,6 @@
 from threading import Thread, Event
 from scapy.all import sendp
-from scapy.all import Packet, Ether, IP, ARP, ICMP
+from scapy.all import Packet, Ether, IP, ARP, ICMP, UDP
 from async_sniff import sniff
 from cpu_metadata import CPUMetadata
 from tables import ArpTableEntry
@@ -121,24 +121,19 @@ class RouterController(Thread):
         reply[ICMP].type = ICMP_T_ECHO_REPLY
         self.createICMPReply(reply)
 
-    def createICMPNetUnreachable(self, pkt):
-        # Generate ICMP net unreachable
+    def createICMPUnreachable(self, pkt, code):
+        # Generate ICMP unreachable
         reply = pkt.copy()
-        reply[ICMP].type = ICMP_T_UNREACHABLE
-        reply[ICMP].code = ICMP_C_NET_UNREACH
-        self.createICMPReply(reply)
-
-    def createICMPHostUnreachable(self, pkt):
-        # Generate ICMP host unreachable
-        reply = pkt.copy()
-        reply[ICMP].type = ICMP_T_UNREACHABLE
-        reply[ICMP].code = ICMP_C_HOST_UNREACH
+        del reply[IP].payload # Delete the payload to avoid sending the original packet
+        # Add the ICMP header
+        reply[IP].proto = IP_PROTO_ICMP
+        reply = reply / ICMP(type=ICMP_T_UNREACHABLE, code=code)
         self.createICMPReply(reply)
 
     def removeArpPendingPkt(self, pending):
         self.arp_pending_buffer.remove(pending)
         pkt = pending.payload['pkt']
-        self.createICMPHostUnreachable(pkt)
+        self.createICMPUnreachable(pkt, ICMP_C_HOST_UNREACH)
 
     def handlePkt(self, pkt):
         # Ignore IPv6 packets:
@@ -164,7 +159,7 @@ class RouterController(Thread):
                 else:
                     print('#Error: Missing next hop')
             elif pkt[CPUMetadata].type == TYPE_ROUTER_MISS:
-                self.createICMPNetUnreachable(pkt)
+                self.createICMPUnreachable(pkt, ICMP_C_NET_UNREACH)
             elif pkt[CPUMetadata].type == TYPE_PWOSPF_HELLO:
                 # TODO: Handle packets for PWOSPF HELLO
                 print('Packet for PWOSPF HELLO')
