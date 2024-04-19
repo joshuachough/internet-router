@@ -14,6 +14,9 @@ IP_PROTO_PWOPSF     = 89
 
 ICMP_T_ECHO_REQ     = 8
 ICMP_T_ECHO_REPLY   = 0
+ICMP_T_UNREACHABLE  = 3
+ICMP_C_NET_UNREACH  = 0
+ICMP_C_HOST_UNREACH = 1
 
 TYPE_ARP            = 0x0806
 TYPE_CPU_METADATA   = 0x080a
@@ -98,17 +101,27 @@ class RouterController(Thread):
         reply[Ether].src = routerPortMac
         self.send(reply)
 
+    def createICMPReply(self, pkt):
+        del pkt[ICMP].chksum # Recalculate checksum
+        pkt[IP].dst, pkt[IP].src = pkt[IP].src, pkt[IP].dst
+        pkt[CPUMetadata].egressPort = pkt[CPUMetadata].srcPort
+        pkt[CPUMetadata].srcPort = 1
+        pkt[CPUMetadata].forward = 1
+        pkt[Ether].dst, pkt[Ether].src = pkt[Ether].src, pkt[Ether].dst
+        self.send(pkt)
+
     def createICMPEchoReply(self, pkt):
         # Generate ICMP echo reply
         reply = pkt.copy()
         reply[ICMP].type = ICMP_T_ECHO_REPLY
-        del reply[ICMP].chksum # Recalculate checksum
-        reply[IP].dst, reply[IP].src = reply[IP].src, reply[IP].dst
-        reply[CPUMetadata].srcPort = 1
-        reply[CPUMetadata].forward = 1
-        reply[CPUMetadata].egressPort = pkt[CPUMetadata].srcPort
-        reply[Ether].dst, reply[Ether].src = reply[Ether].src, reply[Ether].dst
-        self.send(reply)
+        self.createICMPReply(reply)
+
+    def createICMPNetUnreachable(self, pkt):
+        # Generate ICMP net unreachable
+        reply = pkt.copy()
+        reply[ICMP].type = ICMP_T_UNREACHABLE
+        reply[ICMP].code = ICMP_C_NET_UNREACH
+        self.createICMPReply(reply)
 
     def handlePkt(self, pkt):
         # Ignore IPv6 packets:
@@ -134,7 +147,7 @@ class RouterController(Thread):
                 else:
                     print('#Error: Missing next hop')
             elif pkt[CPUMetadata].type == TYPE_ROUTER_MISS:
-                print('#Warning: Packet missed routing table')
+                self.createICMPNetUnreachable(pkt)
             elif pkt[CPUMetadata].type == TYPE_PWOSPF_HELLO:
                 # TODO: Handle packets for PWOSPF HELLO
                 print('Packet for PWOSPF HELLO')
