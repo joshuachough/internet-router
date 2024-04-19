@@ -42,22 +42,23 @@ cpu.start()
 
 h2, h3 = net.get("h2"), net.get("h3")
 
+# TODO: organize for testing presentation
+
 # print(h2.cmd("arping -c1 10.0.0.3"))
 
-# print(h3.cmd("ping -c1 10.0.0.2"))
+print(h3.cmd("ping -c1 10.0.0.2"))
 
 # print(h3.cmd("ping -c1 10.0.0.1"))
 
-print(h3.cmd("ping -c1 10.0.0.4"))
+# print(h3.cmd("ping -c1 10.0.0.4"))
 
-# These table entries were added by the CPU:
 sw.printTableEntries()
 
-# # Print counters
-# print('\n----- Printing counters -----')
-# packet_count, byte_count = sw.readCounter('counters', ARP_COUNTER)
+# # Print packet counters
+# print('\n----- Printing packetCounters -----')
+# packet_count, byte_count = sw.readCounter('packetCounters', ARP_COUNTER)
 # print("ARP_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
-# packet_count, byte_count = sw.readCounter('counters', IP_COUNTER)
+# packet_count, byte_count = sw.readCounter('packetCounters', IP_COUNTER)
 # print("IP_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
-# packet_count, byte_count = sw.readCounter('counters', CTRL_COUNTER)
+# packet_count, byte_count = sw.readCounter('packetCounters', CTRL_COUNTER)
 # print("CTRL_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))

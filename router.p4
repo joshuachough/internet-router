@@ -90,6 +90,9 @@ struct headers {
 struct metadata {
     bit<1> routed;
     ip4Addr_t nextHop;
+    bit<1> countArp;
+    bit<1> countIp;
+    bit<1> countCtrl;
 }
 
 parser MyParser(packet_in packet,
@@ -160,7 +163,15 @@ control MyIngress(inout headers hdr,
                   inout metadata meta,
                   inout standard_metadata_t standard_metadata) {
 
-    counter(NUM_COUNTERS, CounterType.packets_and_bytes) counters;
+    counter(NUM_COUNTERS, CounterType.packets_and_bytes) packetCounters;
+
+    action initMeta() {
+        meta.routed = 0;
+        meta.nextHop = 0;
+        meta.countArp = 0;
+        meta.countIp = 0;
+        meta.countCtrl = 0;
+    }
 
     action drop() {
         mark_to_drop(standard_metadata);
@@ -187,7 +198,7 @@ control MyIngress(inout headers hdr,
         cpu_meta_encap();
         standard_metadata.egress_spec = CPU_PORT;
         hdr.cpu_metadata.type = type;
-        counters.count(CTRL_COUNTER);
+        meta.countCtrl = 1;
     }
 
     // Set the next hop ip address (and port) and apply the ARP table to get the MAC address
@@ -201,7 +212,7 @@ control MyIngress(inout headers hdr,
         hdr.ethernet.srcAddr = srcAddr;
         hdr.ethernet.dstAddr = dstAddr;
         hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
-        counters.count(IP_COUNTER);
+        meta.countIp = 1;
     }
 
     // On routing table miss, send the packet to the CPU
@@ -252,7 +263,7 @@ control MyIngress(inout headers hdr,
     }
 
     apply {
-        meta.routed = 0;
+        initMeta();
 
         if (standard_metadata.ingress_port == CPU_PORT) {
             if (hdr.cpu_metadata.isValid() && hdr.cpu_metadata.forward == 1)
@@ -261,7 +272,7 @@ control MyIngress(inout headers hdr,
         }
         if (meta.routed == 0) {
             if (hdr.arp.isValid() && standard_metadata.ingress_port != CPU_PORT) {
-                counters.count(ARP_COUNTER);
+                meta.countArp = 1;
                 send_to_cpu(TYPE_ARP);
             }
             else if (hdr.ipv4.isValid()) {
@@ -279,6 +290,16 @@ control MyIngress(inout headers hdr,
             }
         }
 
+        // Handle counters
+        if (meta.countArp == 1) {
+            packetCounters.count(ARP_COUNTER);
+        }
+        else if (meta.countIp == 1) {
+            packetCounters.count(IP_COUNTER);
+        }
+        else if (meta.countCtrl == 1) {
+            packetCounters.count(CTRL_COUNTER);
+        }
     }
 }
 
