@@ -10,5 +10,6 @@ load:
 	sudo cp ./* /p4app/
 
 clean:
+	sudo mn -c
 	sudo rm -rf /p4app/
 	sudo rm -rf /tmp/p4app-logs/

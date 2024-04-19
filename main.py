@@ -21,64 +21,86 @@ topo = MyTopology()
 net = P4Mininet(program="router.p4", topo=topo, auto_arp=False)
 net.start()
 
-sw = net.get("s1")
+# Get the routers, controllers, and hosts from the topology
+routers = []
+controllers = []
+hosts = []
+for i, router in enumerate(topology["routers"]):
+    routers.append(net.get(router["name"]))
+    hosts.append([])
+    for host in router["hosts"]:
+        if host['name'][0] == 'c':
+            controllers.append(net.get(host['name']))
+        else:
+            hosts[i].append(net.get(host['name']))
 
 # Set interface MAC and IP addresses
-for i, h in enumerate(topology["switches"][0]["hosts"], start=1):
-    sw.intfs[i].config(mac=h["sw_mac"], ip=h["sw_ip"])
+for i, h in enumerate(topology["routers"][0]["hosts"], start=1):
+    routers[0].intfs[i].config(mac=h["rmac"], ip=h["rip"])
+for i, h in enumerate(topology["routers"][1]["hosts"], start=1):
+    routers[1].intfs[i].config(mac=h["rmac"], ip=h["rip"])
+link = topology["links"][0]
+routers[0].intfs[link["port1"]].config(mac=link["r1mac"], ip=link["r1ip"])
+routers[1].intfs[link["port2"]].config(mac=link["r2mac"], ip=link["r2ip"])
 
 # Add next-hop rules
-for i in range(2, len(topology["switches"][0]["hosts"])+1):
-    host = topology["switches"][0]["hosts"][i-1]
-    sw.insertTableEntry(**RoutingTableEntry(keyIP=host['ip'], dstIP=host['ip'], port=i, priority=i))
+for i, router in enumerate(topology["routers"]):
+    if router["name"] == "r2": continue
+    for j, host in enumerate(router["hosts"], start=1):
+        if host['name'][0] == 'c': continue
+        routers[i].insertTableEntry(**RoutingTableEntry(keyIP=host['ip'], dstIP=host['ip'], port=j, priority=j))
 
 # Fake route
-sw.insertTableEntry(**RoutingTableEntry(keyIP="10.0.0.4", dstIP="10.0.0.4", port=4, priority=4))
+routers[0].insertTableEntry(**RoutingTableEntry(keyIP="10.0.0.4", dstIP="10.0.0.4", port=4, priority=4))
 
 # Add local IP rules
-sw.insertTableEntry(**LocalTableEntry(dstIP="224.0.0.5", t=TYPE_PWOSPF_HELLO))
-sw.insertTableEntry(**LocalTableEntry(dstIP="10.0.0.1", t=TYPE_DIRECT))
+routers[0].insertTableEntry(**LocalTableEntry(dstIP="224.0.0.5", t=TYPE_PWOSPF_HELLO))
+routers[0].insertTableEntry(**LocalTableEntry(dstIP="10.0.0.1", t=TYPE_DIRECT))
 
-# Start the router controller
-cpu = RouterController(sw)
-cpu.start()
+# Start the router controllers
+cpus = [RouterController(routers[0]), RouterController(routers[1])]
+for cpu in cpus:
+    cpu.start()
 
 # CLI(net)
 
-h2, h3 = net.get("h2"), net.get("h3")
-
 # Print topology information
 print('\n----- Printing topology information -----')
-c1 = net.get("c1")
-
-for i in range(len(sw.intfs)):
-    print(sw.intfs[i].name, sw.intfs[i].MAC(), sw.intfs[i].IP())
-print(c1.name, c1.MAC(), c1.IP())
-print(h2.name, h2.MAC(), h2.IP())
-print(h3.name, h3.MAC(), h3.IP())
+for i, router in enumerate(routers):
+    print(router.intfs)
+    for intf in router.intfs.values():
+        print(intf.name, intf.MAC(), intf.IP())
+    print(controllers[i].name, controllers[i].MAC(), controllers[i].IP())
+    for host in hosts[i]:
+        print(host.name, host.MAC(), host.IP())
 print('')
 
 # TODO: organize for testing presentation
 
-# print(h2.cmd("arping -c1 10.0.0.3"))
+# print(hosts[0][0].cmd("arping -c1 10.0.0.3"))
 
-print(h3.cmd("ping -c1 10.0.2.1"))
+print(hosts[0][1].cmd("ping -c1 10.0.2.1"))
 
-# print(h3.cmd("ping -c1 10.0.0.1"))
+print(hosts[0][1].cmd("ping -c1 10.0.0.1"))
 
-# print(h3.cmd("ping -c1 10.0.0.4"))
+print(hosts[0][1].cmd("ping -c1 10.0.0.4"))
 
-# print(h3.cmd("ping -c1 10.0.0.5"))
+print(hosts[0][1].cmd("ping -c1 10.0.0.5"))
 
-sw.printTableEntries()
+routers[0].printTableEntries()
 
 # # Print packet counters
-# print('\n----- Printing packetCounters -----')
-# packet_count, byte_count = sw.readCounter('packetCounters', ARP_COUNTER)
+# print('\n----- Printing r1 packetCounters -----')
+# packet_count, byte_count = r1.readCounter('packetCounters', ARP_COUNTER)
 # print("ARP_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
-# packet_count, byte_count = sw.readCounter('packetCounters', IP_COUNTER)
-# packet_count, byte_count = sw.readCounter('packetCounters', IP_COUNTER)
+# packet_count, byte_count = r1.readCounter('packetCounters', IP_COUNTER)
 # print("IP_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
-# packet_count, byte_count = sw.readCounter('packetCounters', CTRL_COUNTER)
-# packet_count, byte_count = sw.readCounter('packetCounters', CTRL_COUNTER)
+# packet_count, byte_count = r1.readCounter('packetCounters', CTRL_COUNTER)
+# print("CTRL_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
+# print('\n----- Printing r2 packetCounters -----')
+# packet_count, byte_count = r2.readCounter('packetCounters', ARP_COUNTER)
+# print("ARP_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
+# packet_count, byte_count = r2.readCounter('packetCounters', IP_COUNTER)
+# print("IP_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
+# packet_count, byte_count = r2.readCounter('packetCounters', CTRL_COUNTER)
 # print("CTRL_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))

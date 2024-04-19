@@ -41,16 +41,17 @@ ARP_PENDING_TIMEOUT = 5
 ARP_TE_TIMEOUT      = 10
 
 class RouterController(Thread):
-    def __init__(self, sw, start_wait=0.3):
+    def __init__(self, router, start_wait=0.3):
         super(RouterController, self).__init__()
-        self.sw = sw
+        self.router = router
         self.start_wait = start_wait # time to wait for the controller to be listenning
-        self.iface = sw.intfs[1].name
+        self.iface = router.intfs[1].name
         self.port_for_mac = {}
         self.mac_for_ip = {}
         self.stop_event = Event()
         self.arp_pending_buffer = [] # buffer for packets waiting on ARP resolution
         self.arp_timers = [] # timers for ARP entries
+        self.routerPorts = [4]
 
     def addMacAddr(self, mac, port):
         # Don't re-add the mac-port mapping if we already have it:
@@ -64,14 +65,14 @@ class RouterController(Thread):
         self.mac_for_ip[ip] = mac
 
     def addArpEntry(self, ip, mac):
-        srcAddr = self.sw.intfs[self.port_for_mac[mac]].MAC()
+        srcAddr = self.router.intfs[self.port_for_mac[mac]].MAC()
         table_entry = ArpTableEntry(ip, srcAddr, mac)
-        self.sw.insertTableEntry(**table_entry)
+        self.router.insertTableEntry(**table_entry)
         self.arp_timers.append(Timer(self.removeArpEntry, {'table_entry': table_entry}, ARP_TE_TIMEOUT).start())
 
     def removeArpEntry(self, timer):
         table_entry = timer.payload['table_entry']
-        self.sw.removeTableEntry(**table_entry)
+        self.router.removeTableEntry(**table_entry)
         self.arp_timers.remove(timer)
         nextHop = table_entry['match_fields']['meta.nextHop'][0]
         self.mac_for_ip.pop(nextHop)
@@ -81,7 +82,7 @@ class RouterController(Thread):
         self.addMacAddr(pkt[ARP].hwsrc, pkt[CPUMetadata].srcPort)
         self.addIpAddr(pkt[ARP].psrc, pkt[ARP].hwsrc)
         # Send any packets that were waiting on this ARP resolution
-        if pkt[ARP].hwdst == self.sw.intfs[pkt[CPUMetadata].srcPort].MAC():
+        if pkt[ARP].hwdst == self.router.intfs[pkt[CPUMetadata].srcPort].MAC():
             for pending in self.arp_pending_buffer.copy():
                 p = pending.payload['pkt']
                 if p[CPUMetadata].nextHop == pkt[ARP].psrc:
@@ -96,9 +97,9 @@ class RouterController(Thread):
 
     def createArpRequest(self, pkt):
         destIp, srcIp, srcPort = pkt[CPUMetadata].nextHop, pkt[IP].src, pkt[CPUMetadata].srcPort
-        for i in range(2, len(self.sw.intfs)):
-            if i == srcPort: continue
-            srcAddr = self.sw.intfs[i].MAC()
+        for i in range(2, len(self.router.intfs)):
+            if i == srcPort or i in self.routerPorts: continue
+            srcAddr = self.router.intfs[i].MAC()
             pkt = Ether(dst='ff:ff:ff:ff:ff:ff', src=srcAddr, type=TYPE_CPU_METADATA) / CPUMetadata(origEtherType=TYPE_ARP, srcPort=1, forward=1, egressPort=i) / ARP(
                 op=ARP_OP_REQ,
                 hwsrc=srcAddr,
@@ -108,7 +109,7 @@ class RouterController(Thread):
             self.send(pkt)
 
     def createArpReply(self, pkt):
-        routerPortMac = self.sw.intfs[pkt[CPUMetadata].srcPort].MAC()
+        routerPortMac = self.router.intfs[pkt[CPUMetadata].srcPort].MAC()
         reply = pkt.copy()
         reply[ARP].op = ARP_OP_REPLY
         reply[ARP].hwdst = pkt[ARP].hwsrc
@@ -166,7 +167,7 @@ class RouterController(Thread):
 
         # pkt.show2()
 
-        assert CPUMetadata in pkt, "Should only receive packets from switch with special header"
+        assert CPUMetadata in pkt, "Should only receive packets from router with special header"
 
         # Ignore packets that the CPU sends:
         if pkt[CPUMetadata].fromCpu == 1: return
