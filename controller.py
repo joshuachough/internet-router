@@ -138,6 +138,14 @@ class RouterController(Thread):
     def handlePkt(self, pkt):
         # Ignore IPv6 packets:
         if Ether in pkt and pkt[Ether].type == TYPE_IPV6: return
+        # Ignore IGMP packets:
+        if IP in pkt and pkt[IP].proto == 2: return
+        # Ignore MDNS packets:
+        if UDP in pkt and pkt[UDP].dport == 5353: return
+        # Ignore IPv6mcast (33:33:xx:xx:xx:xx):
+        if Ether in pkt and pkt[Ether].dst[:6] == '33:33:': return
+        # Ignore IPv4mcast (01:00:xx:xx:xx:xx):
+        if Ether in pkt and pkt[Ether].dst[:6] == '01:00:': return
 
         # pkt.show2()
 
