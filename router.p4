@@ -20,6 +20,7 @@ const bit<16> TYPE_ARP_MISS     = 0x000c;
 const bit<16> TYPE_PWOSPF_HELLO = 0x000b;
 const bit<16> TYPE_PWOSPF_LSU   = 0x000a;
 const bit<16> TYPE_DIRECT       = 0x0009;
+const bit<16> TYPE_ARP_HIT      = 0x0008;
 
 const bit<8> TYPE_ICMP          = 0x01;
 
@@ -42,6 +43,7 @@ header cpu_metadata_t {
     bit<16> egressPort;
     ip4Addr_t nextHop;
     bit<16> type;
+    bit<8> arpHitNotified;
 }
 
 header arp_t {
@@ -93,6 +95,9 @@ struct metadata {
     bit<1> countArp;
     bit<1> countIp;
     bit<1> countCtrl;
+    bit<1> arpHitNotified;
+    macAddr_t origSrcAddr;
+    macAddr_t origDstAddr;
 }
 
 parser MyParser(packet_in packet,
@@ -171,6 +176,9 @@ control MyIngress(inout headers hdr,
         meta.countArp = 0;
         meta.countIp = 0;
         meta.countCtrl = 0;
+        meta.arpHitNotified = 0;
+        meta.origSrcAddr = hdr.ethernet.srcAddr;
+        meta.origDstAddr = hdr.ethernet.dstAddr;
     }
 
     action drop() {
@@ -266,8 +274,16 @@ control MyIngress(inout headers hdr,
         initMeta();
 
         if (standard_metadata.ingress_port == CPU_PORT) {
-            if (hdr.cpu_metadata.isValid() && hdr.cpu_metadata.forward == 1)
-                set_egr((bit<9>)hdr.cpu_metadata.egressPort);
+            if (hdr.cpu_metadata.isValid()) {
+                // If the controller enabled forwarding, bypass routing
+                if (hdr.cpu_metadata.forward == 1) {
+                    set_egr((bit<9>)hdr.cpu_metadata.egressPort);
+                }
+                // If the controller received arp hit notification, disable CPU sending
+                else if (hdr.cpu_metadata.arpHitNotified == 1) {
+                    meta.arpHitNotified = 1;
+                }
+            }
             cpu_meta_decap();
         }
         if (meta.routed == 0) {
@@ -281,7 +297,15 @@ control MyIngress(inout headers hdr,
 
                 if (local.apply().miss) {
                     if (routing.apply().hit) {
-                        arp.apply();
+                        if (arp.apply().hit && meta.arpHitNotified == 0) {
+                            // Undo ipv4_forward action
+                            hdr.ethernet.srcAddr = meta.origSrcAddr;
+                            hdr.ethernet.dstAddr = meta.origDstAddr;
+                            hdr.ipv4.ttl = hdr.ipv4.ttl + 1;
+                            // Send the packet to the CPU to notify arp hit
+                            send_to_cpu(TYPE_ARP_HIT);
+                            hdr.cpu_metadata.nextHop = meta.nextHop;
+                        }
                     }
                 }
             }
@@ -294,7 +318,7 @@ control MyIngress(inout headers hdr,
         if (meta.countArp == 1) {
             packetCounters.count(ARP_COUNTER);
         }
-        else if (meta.countIp == 1) {
+        else if (meta.countIp == 1 && meta.arpHitNotified == 1) {
             packetCounters.count(IP_COUNTER);
         }
         else if (meta.countCtrl == 1) {

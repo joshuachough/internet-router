@@ -13,7 +13,8 @@ class CPUMetadata(Packet):
                     ByteField("forward", 0),
                     ShortField("egressPort", None),
                     IPField("nextHop", "0.0.0.0"),
-                    ShortField("type", None)]
+                    ShortField("type", None),
+                    ByteField("arpHitNotified", 0)]
 
 bind_layers(Ether, CPUMetadata, type=TYPE_CPU_METADATA)
 bind_layers(CPUMetadata, IP, origEtherType=0x0800)

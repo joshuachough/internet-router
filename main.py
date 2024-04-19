@@ -47,17 +47,28 @@ cpu.start()
 
 h2, h3 = net.get("h2"), net.get("h3")
 
+# Print topology information
+print('\n----- Printing topology information -----')
+c1 = net.get("c1")
+
+for i in range(len(sw.intfs)):
+    print(sw.intfs[i].name, sw.intfs[i].MAC(), sw.intfs[i].IP())
+print(c1.name, c1.MAC(), c1.IP())
+print(h2.name, h2.MAC(), h2.IP())
+print(h3.name, h3.MAC(), h3.IP())
+print('')
+
 # TODO: organize for testing presentation
 
 # print(h2.cmd("arping -c1 10.0.0.3"))
 
 print(h3.cmd("ping -c1 10.0.2.1"))
 
-print(h3.cmd("ping -c1 10.0.0.1"))
+# print(h3.cmd("ping -c1 10.0.0.1"))
 
-print(h3.cmd("ping -c1 10.0.0.4"))
+# print(h3.cmd("ping -c1 10.0.0.4"))
 
-print(h3.cmd("ping -c1 10.0.0.5"))
+# print(h3.cmd("ping -c1 10.0.0.5"))
 
 sw.printTableEntries()
 
@@ -66,16 +77,8 @@ sw.printTableEntries()
 # packet_count, byte_count = sw.readCounter('packetCounters', ARP_COUNTER)
 # print("ARP_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
 # packet_count, byte_count = sw.readCounter('packetCounters', IP_COUNTER)
+# packet_count, byte_count = sw.readCounter('packetCounters', IP_COUNTER)
 # print("IP_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
 # packet_count, byte_count = sw.readCounter('packetCounters', CTRL_COUNTER)
+# packet_count, byte_count = sw.readCounter('packetCounters', CTRL_COUNTER)
 # print("CTRL_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
-
-# # Print topology information
-# c1 = net.get("c1")
-
-# for i in range(len(sw.intfs)):
-#     print(sw.intfs[i].name, sw.intfs[i].MAC(), sw.intfs[i].IP())
-
-# print(c1.name, c1.MAC(), c1.IP())
-# print(h2.name, h2.MAC(), h2.IP())
-# print(h3.name, h3.MAC(), h3.IP())

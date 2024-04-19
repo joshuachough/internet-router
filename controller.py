@@ -1,6 +1,7 @@
 from threading import Thread, Event
 from scapy.all import sendp
 from scapy.all import Packet, Ether, IP, ARP, ICMP, UDP
+
 from async_sniff import sniff
 from cpu_metadata import CPUMetadata
 from tables import ArpTableEntry
@@ -29,6 +30,7 @@ TYPE_ARP_MISS       = 0x000c
 TYPE_PWOSPF_HELLO   = 0x000b
 TYPE_PWOSPF_LSU     = 0x000a
 TYPE_DIRECT         = 0x0009
+TYPE_ARP_HIT        = 0x0008
 
 NUM_COUNTERS        = 3
 ARP_COUNTER         = 0
@@ -36,6 +38,7 @@ IP_COUNTER          = 1
 CTRL_COUNTER        = 2
 
 ARP_PENDING_TIMEOUT = 5
+ARP_TE_TIMEOUT      = 10
 
 class RouterController(Thread):
     def __init__(self, sw, start_wait=0.3):
@@ -47,6 +50,7 @@ class RouterController(Thread):
         self.mac_for_ip = {}
         self.stop_event = Event()
         self.arp_pending_buffer = [] # buffer for packets waiting on ARP resolution
+        self.arp_timers = [] # timers for ARP entries
 
     def addMacAddr(self, mac, port):
         # Don't re-add the mac-port mapping if we already have it:
@@ -56,9 +60,22 @@ class RouterController(Thread):
     def addIpAddr(self, ip, mac):
         # Don't re-add the ip-mac mapping if we already have it:
         if ip in self.mac_for_ip: return
-        srcAddr = self.sw.intfs[self.port_for_mac[mac]].MAC()
-        self.sw.insertTableEntry(**ArpTableEntry(nextHopIP=ip, srcMAC=srcAddr, dstMAC=mac))
+        self.addArpEntry(ip, mac)
         self.mac_for_ip[ip] = mac
+
+    def addArpEntry(self, ip, mac):
+        srcAddr = self.sw.intfs[self.port_for_mac[mac]].MAC()
+        table_entry = ArpTableEntry(ip, srcAddr, mac)
+        self.sw.insertTableEntry(**table_entry)
+        self.arp_timers.append(Timer(self.removeArpEntry, {'table_entry': table_entry}, ARP_TE_TIMEOUT).start())
+
+    def removeArpEntry(self, timer):
+        table_entry = timer.payload['table_entry']
+        self.sw.removeTableEntry(**table_entry)
+        self.arp_timers.remove(timer)
+        nextHop = table_entry['match_fields']['meta.nextHop'][0]
+        self.mac_for_ip.pop(nextHop)
+        print('\nARP entry for {} removed'.format(nextHop))
 
     def handleArpReply(self, pkt):
         self.addMacAddr(pkt[ARP].hwsrc, pkt[CPUMetadata].srcPort)
@@ -166,6 +183,14 @@ class RouterController(Thread):
                     self.createArpRequest(pkt)
                 else:
                     print('#Error: Missing next hop')
+            elif pkt[CPUMetadata].type == TYPE_ARP_HIT and pkt[CPUMetadata].arpHitNotified == 0:
+                for timer in self.arp_timers:
+                    table_entry = timer.payload['table_entry']
+                    nextHop = table_entry['match_fields']['meta.nextHop'][0]
+                    if nextHop == pkt[CPUMetadata].nextHop:
+                        timer.reset()
+                pkt[CPUMetadata].arpHitNotified = 1
+                self.send(pkt)
             elif pkt[CPUMetadata].type == TYPE_ROUTER_MISS:
                 self.createICMPUnreachable(pkt, ICMP_C_NET_UNREACH)
             elif pkt[CPUMetadata].type == TYPE_PWOSPF_HELLO:

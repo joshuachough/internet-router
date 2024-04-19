@@ -32,7 +32,7 @@ topology = {
 }
 
 class MyTopology(Topo):
-    def __init__(self, n, **opts):
+    def __init__(self, **opts):
         Topo.__init__(self, **opts)
 
         for sw in topology["switches"]:
