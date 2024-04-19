@@ -27,7 +27,7 @@ net.start()
 sw = net.get("s1")
 
 # Add next-hop rules
-for i in range(2, N + 1):
+for i in range(2, N + 2):
     sw.insertTableEntry(**RoutingTableEntry(keyIP="10.0.0.%d" % i, dstIP="10.0.0.%d" % i, port=i, priority=i))
 
 # Add local IP rules

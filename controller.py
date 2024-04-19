@@ -4,6 +4,7 @@ from scapy.all import Packet, Ether, IP, ARP, ICMP
 from async_sniff import sniff
 from cpu_metadata import CPUMetadata
 from tables import ArpTableEntry
+from timers import Timer
 import time
 
 ARP_OP_REQ          = 0x0001
@@ -34,6 +35,8 @@ ARP_COUNTER         = 0
 IP_COUNTER          = 1
 CTRL_COUNTER        = 2
 
+ARP_PENDING_TIMEOUT = 5
+
 class RouterController(Thread):
     def __init__(self, sw, start_wait=0.3):
         super(RouterController, self).__init__()
@@ -62,10 +65,12 @@ class RouterController(Thread):
         self.addIpAddr(pkt[ARP].psrc, pkt[ARP].hwsrc)
         # Send any packets that were waiting on this ARP resolution
         if pkt[ARP].hwdst == self.sw.intfs[pkt[CPUMetadata].srcPort].MAC():
-            for p in self.arp_pending_buffer.copy():
+            for pending in self.arp_pending_buffer.copy():
+                p = pending.payload['pkt']
                 if p[CPUMetadata].nextHop == pkt[ARP].psrc:
                     self.send(p)
-                    self.arp_pending_buffer.remove(p)
+                    pending.cancel()
+                    self.arp_pending_buffer.remove(pending)
 
     def handleArpRequest(self, pkt):
         self.addMacAddr(pkt[ARP].hwsrc, pkt[CPUMetadata].srcPort)
@@ -123,6 +128,18 @@ class RouterController(Thread):
         reply[ICMP].code = ICMP_C_NET_UNREACH
         self.createICMPReply(reply)
 
+    def createICMPHostUnreachable(self, pkt):
+        # Generate ICMP host unreachable
+        reply = pkt.copy()
+        reply[ICMP].type = ICMP_T_UNREACHABLE
+        reply[ICMP].code = ICMP_C_HOST_UNREACH
+        self.createICMPReply(reply)
+
+    def removeArpPendingPkt(self, pending):
+        self.arp_pending_buffer.remove(pending)
+        pkt = pending.payload['pkt']
+        self.createICMPHostUnreachable(pkt)
+
     def handlePkt(self, pkt):
         # Ignore IPv6 packets:
         if Ether in pkt and pkt[Ether].type == TYPE_IPV6: return
@@ -142,7 +159,7 @@ class RouterController(Thread):
         elif IP in pkt:
             if pkt[CPUMetadata].type == TYPE_ARP_MISS:
                 if pkt[CPUMetadata].nextHop != '0.0.0.0':
-                    self.arp_pending_buffer.append(pkt)
+                    self.arp_pending_buffer.append(Timer(self.removeArpPendingPkt, {'pkt': pkt}, ARP_PENDING_TIMEOUT).start())
                     self.createArpRequest(pkt)
                 else:
                     print('#Error: Missing next hop')
