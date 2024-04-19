@@ -8,13 +8,14 @@ from controller import RouterController
 from my_topo import SingleSwitchTopo
 from tables import RoutingTableEntry, LocalTableEntry
 
-TYPE_PWOSPF_HELLO = 0x000d
-TYPE_PWOSPF_LSU = 0x000e
+TYPE_PWOSPF_HELLO   = 0x000b
+TYPE_PWOSPF_LSU     = 0x000a
+TYPE_DIRECT         = 0x0009
 
-NUM_COUNTERS = 3
-ARP_COUNTER = 0
-IP_COUNTER = 1
-CTRL_COUNTER = 2
+NUM_COUNTERS        = 3
+ARP_COUNTER         = 0
+IP_COUNTER          = 1
+CTRL_COUNTER        = 2
 
 # Add three hosts. Port 1 (h1) is reserved for the CPU.
 N = 3
@@ -31,7 +32,7 @@ for i in range(2, N + 1):
 
 # Add local IP rules
 sw.insertTableEntry(**LocalTableEntry(dstIP="224.0.0.5", t=TYPE_PWOSPF_HELLO))
-sw.insertTableEntry(**LocalTableEntry(dstIP="10.0.0.1", t=TYPE_PWOSPF_LSU))
+sw.insertTableEntry(**LocalTableEntry(dstIP="10.0.0.1", t=TYPE_DIRECT))
 
 # Start the router controller
 cpu = RouterController(sw)
@@ -43,7 +44,8 @@ h2, h3 = net.get("h2"), net.get("h3")
 
 # print(h2.cmd("arping -c1 10.0.0.3"))
 
-print(h3.cmd("ping -c1 10.0.0.2"))
+# print(h3.cmd("ping -c1 10.0.0.2"))
+print(h3.cmd("ping -c1 10.0.0.1"))
 
 # These table entries were added by the CPU:
 sw.printTableEntries()

@@ -1,28 +1,35 @@
 from threading import Thread, Event
 from scapy.all import sendp
-from scapy.all import Packet, Ether, IP, ARP
+from scapy.all import Packet, Ether, IP, ARP, ICMP
 from async_sniff import sniff
 from cpu_metadata import CPUMetadata
 from tables import ArpTableEntry
 import time
 
-ARP_OP_REQ = 0x0001
-ARP_OP_REPLY = 0x0002
+ARP_OP_REQ          = 0x0001
+ARP_OP_REPLY        = 0x0002
 
-TYPE_ARP = 0x0806
-TYPE_CPU_METADATA = 0x080a
-TYPE_IPV4 = 0x0800
-TYPE_IPV6 = 0x86dd
-TYPE_UNKNOWN = 0x000a
-TYPE_ROUTER_MISS = 0x000b
-TYPE_ARP_MISS = 0x000c
-TYPE_PWOSPF_HELLO = 0x000d
-TYPE_PWOSPF_LSU = 0x000e
+IP_PROTO_ICMP       = 1
+IP_PROTO_PWOPSF     = 89
 
-NUM_COUNTERS = 3
-ARP_COUNTER = 0
-IP_COUNTER = 1
-CTRL_COUNTER = 2
+ICMP_T_ECHO_REQ     = 8
+ICMP_T_ECHO_REPLY   = 0
+
+TYPE_ARP            = 0x0806
+TYPE_CPU_METADATA   = 0x080a
+TYPE_IPV4           = 0x0800
+TYPE_IPV6           = 0x86dd
+TYPE_UNKNOWN        = 0x000e
+TYPE_ROUTER_MISS    = 0x000d
+TYPE_ARP_MISS       = 0x000c
+TYPE_PWOSPF_HELLO   = 0x000b
+TYPE_PWOSPF_LSU     = 0x000a
+TYPE_DIRECT         = 0x0009
+
+NUM_COUNTERS        = 3
+ARP_COUNTER         = 0
+IP_COUNTER          = 1
+CTRL_COUNTER        = 2
 
 class RouterController(Thread):
     def __init__(self, sw, start_wait=0.3):
@@ -91,6 +98,18 @@ class RouterController(Thread):
         reply[Ether].src = routerPortMac
         self.send(reply)
 
+    def createICMPEchoReply(self, pkt):
+        # Generate ICMP echo reply
+        reply = pkt.copy()
+        reply[ICMP].type = ICMP_T_ECHO_REPLY
+        del reply[ICMP].chksum # Recalculate checksum
+        reply[IP].dst, reply[IP].src = reply[IP].src, reply[IP].dst
+        reply[CPUMetadata].srcPort = 1
+        reply[CPUMetadata].forward = 1
+        reply[CPUMetadata].egressPort = pkt[CPUMetadata].srcPort
+        reply[Ether].dst, reply[Ether].src = reply[Ether].src, reply[Ether].dst
+        self.send(reply)
+
     def handlePkt(self, pkt):
         # Ignore IPv6 packets:
         if Ether in pkt and pkt[Ether].type == TYPE_IPV6: return
@@ -119,9 +138,13 @@ class RouterController(Thread):
             elif pkt[CPUMetadata].type == TYPE_PWOSPF_HELLO:
                 # TODO: Handle packets for PWOSPF HELLO
                 print('Packet for PWOSPF HELLO')
-            elif pkt[CPUMetadata].type == TYPE_PWOSPF_LSU:
-                # TODO: Handle packets for PWOSPF LSU
-                print('Packet for PWOSPF LSU')
+            elif pkt[CPUMetadata].type == TYPE_DIRECT:
+                if pkt[IP].proto == IP_PROTO_ICMP and ICMP in pkt:
+                    if pkt[ICMP].type == ICMP_T_ECHO_REQ:
+                        self.createICMPEchoReply(pkt)
+                elif pkt[IP].proto == IP_PROTO_PWOPSF:
+                    # TODO: Handle packets for PWOSPF LSU
+                    print('Packet for PWOSPF LSU')
 
     def send(self, *args, **override_kwargs):
         pkt = args[0]

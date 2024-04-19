@@ -48,11 +48,12 @@ function get_type_name(opcode)
   local name = "Unknown"
 
       if opcode == 0x0806 then name = "TYPE_ARP"
-  elseif opcode == 0x000a then name = "TYPE_UNKNOWN"
-  elseif opcode == 0x000b then name = "TYPE_ROUTER_MISS"
+  elseif opcode == 0x000e then name = "TYPE_UNKNOWN"
+  elseif opcode == 0x000d then name = "TYPE_ROUTER_MISS"
   elseif opcode == 0x000c then name = "TYPE_ARP_MISS"
-  elseif opcode == 0x000d then name = "TYPE_PWOSPF_HELLO"
-  elseif opcode == 0x000e then name = "TYPE_PWOSPF_LSU" end
+  elseif opcode == 0x000b then name = "TYPE_PWOSPF_HELLO"
+  elseif opcode == 0x000a then name = "TYPE_PWOSPF_LSU"
+  elseif opcode == 0x0009 then name = "TYPE_DIRECT" end
 
   return name
 end

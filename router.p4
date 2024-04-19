@@ -14,11 +14,14 @@ const bit<16> ARP_OP_REPLY      = 0x0002;
 const bit<16> TYPE_ARP          = 0x0806;
 const bit<16> TYPE_CPU_METADATA = 0x080a;
 const bit<16> TYPE_IPV4         = 0x0800;
-const bit<16> TYPE_UNKNOWN      = 0x000a;
-const bit<16> TYPE_ROUTER_MISS  = 0x000b;
+const bit<16> TYPE_UNKNOWN      = 0x000e;
+const bit<16> TYPE_ROUTER_MISS  = 0x000d;
 const bit<16> TYPE_ARP_MISS     = 0x000c;
-const bit<16> TYPE_PWOSPF_HELLO = 0x000d;
-const bit<16> TYPE_PWOSPF_LSU   = 0x000e;
+const bit<16> TYPE_PWOSPF_HELLO = 0x000b;
+const bit<16> TYPE_PWOSPF_LSU   = 0x000a;
+const bit<16> TYPE_DIRECT       = 0x0009;
+
+const bit<8> TYPE_ICMP          = 0x01;
 
 const bit<32> NUM_COUNTERS      = 3;
 const bit<32> ARP_COUNTER       = 0;
@@ -69,11 +72,19 @@ header ipv4_t {
     ip4Addr_t dstAddr;
 }
 
+header icmp_t {
+    bit<8> type;
+    bit<8> code;
+    bit<16> checksum;
+    bit<32> rest;
+}
+
 struct headers {
     ethernet_t        ethernet;
     cpu_metadata_t    cpu_metadata;
     arp_t             arp;
     ipv4_t            ipv4;
+    icmp_t            icmp;
 }
 
 struct metadata {
@@ -115,6 +126,14 @@ parser MyParser(packet_in packet,
 
     state parse_ipv4 {
         packet.extract(hdr.ipv4);
+        transition select(hdr.ipv4.protocol) {
+            TYPE_ICMP: parse_icmp;
+            default: accept;
+        }
+    }
+
+    state parse_icmp {
+        packet.extract(hdr.icmp);
         transition accept;
     }
 }
@@ -293,6 +312,7 @@ control MyDeparser(packet_out packet, in headers hdr) {
         packet.emit(hdr.cpu_metadata);
         packet.emit(hdr.arp);
         packet.emit(hdr.ipv4);
+        packet.emit(hdr.icmp);
     }
 }
 
