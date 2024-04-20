@@ -6,6 +6,7 @@ from scapy.utils import checksum
 import struct
 
 from timers import Timer
+from graph import Graph, Dijkstra
 
 IP_PROTO_PWOPSF     = 89
 
@@ -52,6 +53,9 @@ class PWOSPFRouter:
         self.router_id = router_id
         self.lsuint = lsuint
         self.interfaces = interfaces
+
+        self.topodb = Graph()
+        self.dijkstra = Dijkstra(self.topodb)
 
     def add_interface(self, *args, **kwargs):
         interface = PWOSPFInterface(self, *args, **kwargs)

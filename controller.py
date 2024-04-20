@@ -7,9 +7,11 @@ from scapy.compat import raw
 from async_sniff import sniff
 from cpu_metadata import CPUMetadata
 from pwospf import PWOSPF, HELLO, PWOSPFRouter
-from tables import ArpTableEntry
+from tables import ArpTableEntry, RoutingTableEntry, RoutingTable
 from timers import Timer
+
 import time
+import ipaddress
 
 ARP_OP_REQ          = 0x0001
 ARP_OP_REPLY        = 0x0002
@@ -52,8 +54,14 @@ ARP_TE_TIMEOUT      = 10
 
 ALLSPFRouters       = "224.0.0.5"
 
+def mask_ip_address(ip, mask):
+    ip_int = int(ipaddress.IPv4Address(ip))
+    masked_ip_int = ip_int & mask
+    masked_ip = str(ipaddress.IPv4Address(masked_ip_int))
+    return masked_ip
+
 class RouterController(Thread):
-    def __init__(self, router, router_id, start_wait=0.3):
+    def __init__(self, router, router_id, hosts, start_wait=0.3):
         super(RouterController, self).__init__()
         self.router = router
         self.start_wait = start_wait # time to wait for the controller to be listenning
@@ -63,7 +71,8 @@ class RouterController(Thread):
         self.stop_event = Event()
         self.arp_pending_buffer = [] # buffer for packets waiting on ARP resolution
         self.arp_timers = [] # timers for ARP entries
-        self.routerPorts = [4]
+        self.routerPorts = [4] # TODO: FIX THIS!
+        self.routing_table = RoutingTable()
 
         self.pwospf = PWOSPFRouter(PWOSPF_AREA, router_id)
         for port, intf in self.router.intfs.items():
@@ -71,7 +80,42 @@ class RouterController(Thread):
             # Change prefix (24) into netmask (0xffffff00)
             netmask = 0xffffffff ^ (1 << 32 - int(intf.prefixLen)) - 1
             self.pwospf.add_interface(intf.IP(), netmask, self.broadcastHELLO, PWOSPF_HELLOINT, port=port, mac=intf.MAC())
-        # TODO: Add each host (with netmask) to topodb which will run Dijkstra's and update routing/ARP tables
+            self.pwospf.topodb.add_node(str(router_id), intf.IP())
+
+        if router_id == 1:
+            self.pwospf.topodb.add_node(str(2), '10.0.10.1')
+            self.pwospf.topodb.add_edge(str(router_id), str(2), 1, {'port': 4, 'netmask': 0xffffff00, 'mac': '00:00:00:00:00:bb'}, '10.0.10.1')
+        elif router_id == 2:
+            self.pwospf.topodb.add_node(str(1), '10.0.10.0')
+            self.pwospf.topodb.add_edge(str(router_id), str(1), 1, {'port': 3, 'netmask': 0xffffff00, 'mac': '00:00:00:00:00:aa'}, '10.0.10.0')
+        
+        # Add each host (with netmask) to topodb
+        for i, host in enumerate(hosts, start=1):
+            if host['name'][0] == 'c': continue
+            self.pwospf.topodb.add_node(host['ip'], host['ip'])
+            netmask = 0xffffffff ^ (1 << 32 - int(self.router.intfs[i].prefixLen)) - 1
+            self.pwospf.topodb.add_edge(str(router_id), host['ip'], 1, {'port': i, 'netmask': netmask, 'mac': host['mac']}, host['ip'])
+        
+        # Run Dijkstra's algorithm to calculate next hop for each destination
+        routing_rules = self.pwospf.dijkstra.calculate_next_hop(str(router_id))
+        
+        #  Update routing/ARP tables
+        for dst_ip, rule in routing_rules.items():
+            is_router = rule['router_id'] != None
+            # Routing table entry
+            te = RoutingTableEntry(
+                keyIP=mask_ip_address(dst_ip, rule['netmask']) if is_router else dst_ip,
+                mask=rule['netmask'] if is_router else 0xffffffff,
+                dstIP=rule['ip'],
+                port=rule['port'],
+                priority=rule['port']
+            )
+            self.router.insertTableEntry(**te)
+            self.routing_table.add_entry(te)
+            # ARP table entry
+            if rule['router_id'] != None:
+                self.addMacAddr(rule['mac'], rule['port'])
+                self.addIpAddr(rule['ip'], rule['mac'])
 
     def addMacAddr(self, mac, port):
         # Don't re-add the mac-port mapping if we already have it:

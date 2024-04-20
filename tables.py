@@ -42,4 +42,42 @@ class LocalTableEntry(TableEntry):
             action_params={"type": t},
             priority=None
         )
+
+class Table:
+    def __init__(self, name, size=1024, entries=[]):
+        self.name = name
+        self.entries = entries
+        self.size = size
+
+    def add_entry(self, entry):
+        self.entries.append(entry)
+
+    def remove_entry(self, entry):
+        self.entries.remove(entry)
+
+    def get_entry(self, **kwargs):
+        for entry in self.entries:
+            for key, value in kwargs.items():
+                if entry[key] != value:
+                    break
+            else:
+                return entry
+        return None
+
+    def get_entries(self, **kwargs):
+        entries = []
+        for entry in self.entries:
+            for key, value in kwargs.items():
+                if entry[key] != value:
+                    break
+            else:
+                entries.append(entry)
+        return entries
+
+    def __str__(self):
+        return f"Table {self.name}:\n" + '\n'.join([str(entry) for entry in self.entries])
+    
+class RoutingTable(Table):
+    def __init__(self, size=1024, entries=[]):
+        super(RoutingTable, self).__init__("MyIngress.routing", size, entries)
         

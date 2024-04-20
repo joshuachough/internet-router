@@ -38,23 +38,15 @@ for i, router in enumerate(topology["routers"]):
             hosts[i].append(net.get(host['name']))
 
 # Set interface MAC and IP addresses
-for i, h in enumerate(topology["routers"][0]["hosts"], start=1):
-    routers[0].intfs[i].config(mac=h["rmac"], ip=h["rip"])
-for i, h in enumerate(topology["routers"][1]["hosts"], start=1):
-    routers[1].intfs[i].config(mac=h["rmac"], ip=h["rip"])
+for i in range(len(routers)):
+    for j, h in enumerate(topology["routers"][i]["hosts"], start=1):
+        routers[i].intfs[j].config(mac=h["rmac"], ip=h["rip"])
 link = topology["links"][0]
 routers[0].intfs[link["port1"]].config(mac=link["r1mac"], ip=link["r1ip"])
 routers[1].intfs[link["port2"]].config(mac=link["r2mac"], ip=link["r2ip"])
 
-# Add next-hop rules
-for i, router in enumerate(topology["routers"]):
-    if router["name"] == "r2": continue
-    for j, host in enumerate(router["hosts"], start=1):
-        if host['name'][0] == 'c': continue
-        routers[i].insertTableEntry(**RoutingTableEntry(keyIP=host['ip'], dstIP=host['ip'], port=j, priority=j))
-
-# Fake route
-routers[0].insertTableEntry(**RoutingTableEntry(keyIP="10.0.0.4", dstIP="10.0.0.4", port=4, priority=4))
+# # Fake route
+# routers[0].insertTableEntry(**RoutingTableEntry(keyIP="10.0.0.4", dstIP="10.0.0.4", port=4, priority=4))
 
 # Add local IP rules
 for router in routers:
@@ -62,7 +54,7 @@ for router in routers:
     router.insertTableEntry(**LocalTableEntry(dstIP=RouterControllerIP, t=TYPE_DIRECT))
 
 # Start the router controllers
-cpus = [RouterController(routers[i], i+1) for i in range(len(routers))]
+cpus = [RouterController(routers[i], i+1, topology["routers"][i]["hosts"]) for i in range(len(routers))]
 for cpu in cpus:
     cpu.start()
 
@@ -92,7 +84,8 @@ print('')
 
 # print(hosts[0][1].cmd("ping -c1 10.0.0.5"))
 
-# routers[0].printTableEntries()
+for router in routers:
+    router.printTableEntries()
 
 # # Print packet counters
 # print('\n----- Printing r1 packetCounters -----')
