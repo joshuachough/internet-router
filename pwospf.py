@@ -48,14 +48,15 @@ bind_layers(IP, PWOSPF, proto=IP_PROTO_PWOPSF)
 bind_layers(PWOSPF, HELLO, type=PWOSPF_TYPE_HELLO)
 
 class PWOSPFRouter:
-    def __init__(self, area_id, router_id, lsuint=30, interfaces=[]):
+    def __init__(self, area_id, router_id, lsuint=30, interfaces=None):
         self.area_id = area_id
         self.router_id = router_id
         self.lsuint = lsuint
-        self.interfaces = interfaces
+        self.interfaces = [] if interfaces is None else interfaces
 
         self.topodb = Graph()
         self.dijkstra = Dijkstra(self.topodb)
+
 
     def add_interface(self, *args, **kwargs):
         interface = PWOSPFInterface(self, *args, **kwargs)
@@ -73,6 +74,11 @@ class PWOSPFRouter:
             if intf.has_neighbor():
                 ports.append(intf.port)
         return ports
+    
+    def print_interfaces(self):
+        print(f"Router {self.router_id} in area {self.area_id} has the following interfaces:")
+        for intf in self.interfaces:
+            print(f"\tInterface {intf.ip} on port {intf.port}")
 
 class PWOSPFInterface:
     def __init__(self, router, ip, netmask, hello_bcast, helloint=10, port=None, mac=None):
