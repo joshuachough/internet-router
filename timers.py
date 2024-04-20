@@ -1,7 +1,7 @@
 from threading import Timer as ThreadTimer
 
 class Timer:
-    def __init__(self, callback, payload, timeout=60):
+    def __init__(self, callback, payload=None, timeout=60):
         self.callback = callback
         self.payload = payload
         self.timeout = timeout

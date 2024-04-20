@@ -4,6 +4,7 @@ from scapy.all import Packet, Ether, IP, ARP, ICMP, UDP
 
 from async_sniff import sniff
 from cpu_metadata import CPUMetadata
+from pwospf import PWOSPF, HELLO, PWOSPFRouter
 from tables import ArpTableEntry
 from timers import Timer
 import time
@@ -19,6 +20,10 @@ ICMP_T_ECHO_REPLY   = 0
 ICMP_T_UNREACHABLE  = 3
 ICMP_C_NET_UNREACH  = 0
 ICMP_C_HOST_UNREACH = 1
+
+PWOSPF_HELLO_LEN    = 32
+PWOSPF_AREA         = 1
+PWOSPF_HELLOINT     = 10
 
 TYPE_ARP            = 0x0806
 TYPE_CPU_METADATA   = 0x080a
@@ -40,8 +45,10 @@ CTRL_COUNTER        = 2
 ARP_PENDING_TIMEOUT = 5
 ARP_TE_TIMEOUT      = 10
 
+ALLSPFRouters       = "224.0.0.5"
+
 class RouterController(Thread):
-    def __init__(self, router, start_wait=0.3):
+    def __init__(self, router, router_id, start_wait=0.3):
         super(RouterController, self).__init__()
         self.router = router
         self.start_wait = start_wait # time to wait for the controller to be listenning
@@ -52,6 +59,13 @@ class RouterController(Thread):
         self.arp_pending_buffer = [] # buffer for packets waiting on ARP resolution
         self.arp_timers = [] # timers for ARP entries
         self.routerPorts = [4]
+
+        self.pwospf = PWOSPFRouter(PWOSPF_AREA, router_id)
+        for port, intf in self.router.intfs.items():
+            if port == 0 or port == 1: continue
+            # Change prefix (24) into netmask (0xffffff00)
+            netmask = 0xffffffff ^ (1 << 32 - int(intf.prefixLen)) - 1
+            self.pwospf.add_interface(intf.IP(), netmask, self.broadcastHELLO, PWOSPF_HELLOINT, port=port, mac=intf.MAC())
 
     def addMacAddr(self, mac, port):
         # Don't re-add the mac-port mapping if we already have it:
@@ -153,6 +167,32 @@ class RouterController(Thread):
         pkt = pending.payload['pkt']
         self.createICMPUnreachable(pkt, ICMP_C_HOST_UNREACH)
 
+    def broadcastHELLO(self, timer):
+        intf = timer.payload['interface']
+        pkt = Ether(
+            dst='ff:ff:ff:ff:ff:ff',
+            src=intf.mac,
+            type=TYPE_CPU_METADATA
+            ) / CPUMetadata(
+                origEtherType=TYPE_IPV4,
+                srcPort=1,
+                forward=1,
+                egressPort=intf.port
+                ) / IP(
+                    dst=ALLSPFRouters,
+                    src=intf.ip,
+                    proto=IP_PROTO_PWOPSF
+                    ) / PWOSPF( # how is the checksum calculated? 
+                        type=TYPE_PWOSPF_HELLO,
+                        length=PWOSPF_HELLO_LEN,
+                        router_id=intf.router_id,
+                        area_id=intf.area_id
+                        ) / HELLO(
+                            netmask=intf.netmask,
+                            helloint=intf.helloint)
+        self.send(pkt)
+        timer.reset()
+
     def handlePkt(self, pkt):
         # Ignore IPv6 packets:
         if Ether in pkt and pkt[Ether].type == TYPE_IPV6: return
@@ -196,7 +236,7 @@ class RouterController(Thread):
                 self.createICMPUnreachable(pkt, ICMP_C_NET_UNREACH)
             elif pkt[CPUMetadata].type == TYPE_PWOSPF_HELLO:
                 # TODO: Handle packets for PWOSPF HELLO
-                print('Packet for PWOSPF HELLO')
+                print('Packet for PWOSPF HELLO from {} arrived at port {} ({})'.format(pkt[Ether].src, pkt[CPUMetadata].srcPort, pkt[Ether].dst))
             elif pkt[CPUMetadata].type == TYPE_DIRECT:
                 if pkt[IP].proto == IP_PROTO_ICMP and ICMP in pkt:
                     if pkt[ICMP].type == ICMP_T_ECHO_REQ:

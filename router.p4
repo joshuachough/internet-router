@@ -5,6 +5,7 @@
 typedef bit<9>  port_t;
 typedef bit<48> macAddr_t;
 typedef bit<32> ip4Addr_t;
+typedef bit<32> id_t;
 
 const port_t CPU_PORT           = 0x1;
 
@@ -22,7 +23,11 @@ const bit<16> TYPE_PWOSPF_LSU   = 0x000a;
 const bit<16> TYPE_DIRECT       = 0x0009;
 const bit<16> TYPE_ARP_HIT      = 0x0008;
 
-const bit<8> TYPE_ICMP          = 0x01;
+const bit<8> TYPE_ICMP          = 1;
+const bit<8> TYPE_PWOSPF        = 89;
+
+const bit<8> TYPE_HELLO         = 1;
+const bit<8> TYPE_LSU           = 4;
 
 const bit<32> NUM_COUNTERS      = 3;
 const bit<32> ARP_COUNTER       = 0;
@@ -81,12 +86,30 @@ header icmp_t {
     bit<32> rest;
 }
 
+header pwospf_t {
+    bit<8> version;
+    bit<8> type;
+    bit<16> length;
+    id_t routerID;
+    id_t areaID;
+    bit<16> checksum;
+    bit<16> authType;
+    bit<64> auth;
+}
+
+header hello_t {
+    bit<32> netmask;
+    bit<16> helloInterval;
+}
+
 struct headers {
     ethernet_t        ethernet;
     cpu_metadata_t    cpu_metadata;
     arp_t             arp;
     ipv4_t            ipv4;
     icmp_t            icmp;
+    pwospf_t          pwospf;
+    hello_t           hello;
 }
 
 struct metadata {
@@ -136,12 +159,26 @@ parser MyParser(packet_in packet,
         packet.extract(hdr.ipv4);
         transition select(hdr.ipv4.protocol) {
             TYPE_ICMP: parse_icmp;
+            TYPE_PWOSPF: parse_pwospf;
             default: accept;
         }
     }
 
     state parse_icmp {
         packet.extract(hdr.icmp);
+        transition accept;
+    }
+
+    state parse_pwospf {
+        packet.extract(hdr.pwospf);
+        transition select(hdr.pwospf.type) {
+            TYPE_HELLO: parse_hello;
+            default: accept;
+        }
+    }
+
+    state parse_hello {
+        packet.extract(hdr.hello);
         transition accept;
     }
 }

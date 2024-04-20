@@ -17,6 +17,9 @@ ARP_COUNTER         = 0
 IP_COUNTER          = 1
 CTRL_COUNTER        = 2
 
+ALLSPFRouters = "224.0.0.5"
+RouterControllerIP = "10.0.0.1"
+
 topo = MyTopology()
 net = P4Mininet(program="router.p4", topo=topo, auto_arp=False)
 net.start()
@@ -54,11 +57,12 @@ for i, router in enumerate(topology["routers"]):
 routers[0].insertTableEntry(**RoutingTableEntry(keyIP="10.0.0.4", dstIP="10.0.0.4", port=4, priority=4))
 
 # Add local IP rules
-routers[0].insertTableEntry(**LocalTableEntry(dstIP="224.0.0.5", t=TYPE_PWOSPF_HELLO))
-routers[0].insertTableEntry(**LocalTableEntry(dstIP="10.0.0.1", t=TYPE_DIRECT))
+for router in routers:
+    router.insertTableEntry(**LocalTableEntry(dstIP=ALLSPFRouters, t=TYPE_PWOSPF_HELLO))
+    router.insertTableEntry(**LocalTableEntry(dstIP=RouterControllerIP, t=TYPE_DIRECT))
 
 # Start the router controllers
-cpus = [RouterController(routers[0]), RouterController(routers[1])]
+cpus = [RouterController(routers[i], i+1) for i in range(len(routers))]
 for cpu in cpus:
     cpu.start()
 
@@ -69,7 +73,8 @@ print('\n----- Printing topology information -----')
 for i, router in enumerate(routers):
     print(router.intfs)
     for intf in router.intfs.values():
-        print(intf.name, intf.MAC(), intf.IP())
+        print(intf.name, intf.MAC(), intf.IP(), intf.prefixLen)
+        
     print(controllers[i].name, controllers[i].MAC(), controllers[i].IP())
     for host in hosts[i]:
         print(host.name, host.MAC(), host.IP())
@@ -79,15 +84,15 @@ print('')
 
 # print(hosts[0][0].cmd("arping -c1 10.0.0.3"))
 
-print(hosts[0][1].cmd("ping -c1 10.0.2.1"))
+# print(hosts[0][1].cmd("ping -c1 10.0.2.1"))
 
-print(hosts[0][1].cmd("ping -c1 10.0.0.1"))
+# print(hosts[0][1].cmd("ping -c1 10.0.0.1"))
 
-print(hosts[0][1].cmd("ping -c1 10.0.0.4"))
+# print(hosts[0][1].cmd("ping -c1 10.0.0.4"))
 
-print(hosts[0][1].cmd("ping -c1 10.0.0.5"))
+# print(hosts[0][1].cmd("ping -c1 10.0.0.5"))
 
-routers[0].printTableEntries()
+# routers[0].printTableEntries()
 
 # # Print packet counters
 # print('\n----- Printing r1 packetCounters -----')
