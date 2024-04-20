@@ -100,6 +100,7 @@ header pwospf_t {
 header hello_t {
     bit<32> netmask;
     bit<16> helloInterval;
+    bit<16> padding;
 }
 
 struct headers {
@@ -395,6 +396,8 @@ control MyDeparser(packet_out packet, in headers hdr) {
         packet.emit(hdr.arp);
         packet.emit(hdr.ipv4);
         packet.emit(hdr.icmp);
+        packet.emit(hdr.pwospf);
+        packet.emit(hdr.hello);
     }
 }
 

@@ -1,6 +1,8 @@
 from threading import Thread, Event
 from scapy.all import sendp
-from scapy.all import Packet, Ether, IP, ARP, ICMP, UDP
+from scapy.all import Packet, Ether, IP, ARP, ICMP, UDP, Padding
+from scapy.utils import checksum
+from scapy.compat import raw
 
 from async_sniff import sniff
 from cpu_metadata import CPUMetadata
@@ -21,9 +23,12 @@ ICMP_T_UNREACHABLE  = 3
 ICMP_C_NET_UNREACH  = 0
 ICMP_C_HOST_UNREACH = 1
 
+PWOSPF_VERSION      = 2
+PWOSPF_TYPE_HELLO   = 1
+PWOSPF_TYPE_LSU     = 4
 PWOSPF_HELLO_LEN    = 32
 PWOSPF_AREA         = 1
-PWOSPF_HELLOINT     = 10
+PWOSPF_HELLOINT     = 5
 
 TYPE_ARP            = 0x0806
 TYPE_CPU_METADATA   = 0x080a
@@ -66,6 +71,7 @@ class RouterController(Thread):
             # Change prefix (24) into netmask (0xffffff00)
             netmask = 0xffffffff ^ (1 << 32 - int(intf.prefixLen)) - 1
             self.pwospf.add_interface(intf.IP(), netmask, self.broadcastHELLO, PWOSPF_HELLOINT, port=port, mac=intf.MAC())
+        # TODO: Add each host (with netmask) to topodb which will run Dijkstra's and update routing/ARP tables
 
     def addMacAddr(self, mac, port):
         # Don't re-add the mac-port mapping if we already have it:
@@ -168,7 +174,7 @@ class RouterController(Thread):
         self.createICMPUnreachable(pkt, ICMP_C_HOST_UNREACH)
 
     def broadcastHELLO(self, timer):
-        intf = timer.payload['interface']
+        intf = timer.payload['intf']
         pkt = Ether(
             dst='ff:ff:ff:ff:ff:ff',
             src=intf.mac,
@@ -182,9 +188,8 @@ class RouterController(Thread):
                     dst=ALLSPFRouters,
                     src=intf.ip,
                     proto=IP_PROTO_PWOPSF
-                    ) / PWOSPF( # how is the checksum calculated? 
-                        type=TYPE_PWOSPF_HELLO,
-                        length=PWOSPF_HELLO_LEN,
+                    ) / PWOSPF(
+                        type=PWOSPF_TYPE_HELLO,
                         router_id=intf.router_id,
                         area_id=intf.area_id
                         ) / HELLO(
@@ -192,6 +197,46 @@ class RouterController(Thread):
                             helloint=intf.helloint)
         self.send(pkt)
         timer.reset()
+
+    def verifyPWOSPF(self, pkt):
+        if PWOSPF not in pkt:
+            print("#Warning: PWOSPF packets should have PWOSPF layer")
+            return False
+        if pkt[PWOSPF].version != PWOSPF_VERSION:
+            print("#Warning: PWOSPF version should be 2")
+            return False
+        if pkt[PWOSPF].area_id != self.pwospf.area_id:
+            print("#Warning: PWOSPF area_id should match receiving router's area_id")
+            return False
+        if pkt[PWOSPF].authtype != 0:
+            print("#Warning: PWOSPF authtype should be 0")
+            return False
+        if pkt[PWOSPF].auth != 0:
+            print("#Warning: PWOSPF auth should be 0")
+            return False
+        if pkt[PWOSPF].chksum == 0:
+            print("#Warning: PWOSPF checksum should not be 0")
+            return False
+        if pkt[PWOSPF].length != PWOSPF_HELLO_LEN:
+            print("#Warning: PWOSPF length should be 32")
+            return False
+        return True
+
+    def verifyHELLO(self, pkt):
+        if HELLO not in pkt:
+            print("#Warning: PWOSPF HELLO packets should have HELLO layer")
+            return False
+        if self.pwospf.find_hello_intf(pkt[CPUMetadata].srcPort, pkt[HELLO].netmask, pkt[HELLO].helloint) == None:
+            print("#Warning: HELLO packet should match router's interface")
+            return False
+        return True
+    
+    def removeNeighbor(self, timer):
+        intf = timer.payload['intf']
+        neighbor = timer.payload['neighbor']
+        intf.remove_neighbor(neighbor)
+        # TODO: Update topodb which will run Dijkstra's and update routing/ARP tables
+        # TODO: Send LSU with neighbor removed
 
     def handlePkt(self, pkt):
         # Ignore IPv6 packets:
@@ -235,19 +280,22 @@ class RouterController(Thread):
             elif pkt[CPUMetadata].type == TYPE_ROUTER_MISS:
                 self.createICMPUnreachable(pkt, ICMP_C_NET_UNREACH)
             elif pkt[CPUMetadata].type == TYPE_PWOSPF_HELLO:
-                assert PWOSPF in pkt, "PWOSPF packets should have PWOSPF layer"
-                assert HELLO in pkt, "PWOSPF HELLO packets should have HELLO layer"
-                # TODO: Handle packets for PWOSPF HELLO
-                print('Packet for PWOSPF HELLO from {} arrived at port {} ({})'.format(pkt[Ether].src, pkt[CPUMetadata].srcPort, pkt[Ether].dst))
+                if self.verifyPWOSPF(pkt) and self.verifyHELLO(pkt):
+                    intf = self.pwospf.find_hello_intf(pkt[CPUMetadata].srcPort, pkt[HELLO].netmask, pkt[HELLO].helloint)
+                    if not intf.find_neighbor(pkt[PWOSPF].router_id, pkt[IP].src):
+                        intf.add_neighbor(pkt[PWOSPF].router_id, pkt[IP].src, self.removeNeighbor)
+                        # TODO: Update topodb which will run Dijkstra's and update routing/ARP tables
+                        # TODO: Send LSU to all neighbors
+                    print('Packet for PWOSPF HELLO from {} arrived at port {} ({})'.format(pkt[Ether].src, pkt[CPUMetadata].srcPort, pkt[Ether].dst))
             elif pkt[CPUMetadata].type == TYPE_DIRECT:
                 if pkt[IP].proto == IP_PROTO_ICMP:
                     assert ICMP in pkt, "ICMP packets should have ICMP layer"
                     if pkt[ICMP].type == ICMP_T_ECHO_REQ:
                         self.createICMPEchoReply(pkt)
                 elif pkt[IP].proto == IP_PROTO_PWOPSF:
-                    assert PWOSPF in pkt, "PWOSPF packets should have PWOSPF layer"
-                    # TODO: Handle packets for PWOSPF LSU
-                    print('Packet for PWOSPF LSU')
+                    if self.verifyPWOSPF(pkt):
+                        # TODO: Handle packets for PWOSPF LSU
+                        print('Packet for PWOSPF LSU')
 
     def send(self, *args, **override_kwargs):
         pkt = args[0]
