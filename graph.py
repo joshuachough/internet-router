@@ -20,6 +20,12 @@ class Graph:
         edge = Edge(to_node, weight, data, ip_address)
         self.adjacency_list[from_node].append(edge)
 
+    def remove_edge(self, from_node, to_node):
+        for edge in self.adjacency_list[from_node]:
+            if edge.to == to_node:
+                self.adjacency_list[from_node].remove(edge)
+                break
+
     def print_graph(self):
         for node in self.adjacency_list:
             edges = []
@@ -88,21 +94,26 @@ class Dijkstra:
                 all_shortest_paths[start_node][end_ip] = {'distance': distance, 'path': path}
         return all_shortest_paths
 
-    def print_all_shortest_paths(self):
-        all_shortest_paths = self.calculate_all_shortest_paths()
-        for start_node in all_shortest_paths:
-            for end_ip in all_shortest_paths[start_node]:
-                distance = all_shortest_paths[start_node][end_ip]['distance']
-                path = ' -> '.join(all_shortest_paths[start_node][end_ip]['path'])
+    def print_all_shortest_paths(self, paths=None):
+        if paths is None:
+            paths = self.calculate_all_shortest_paths()
+        for start_node in paths:
+            for end_ip in paths[start_node]:
+                distance = paths[start_node][end_ip]['distance']
+                path = ' -> '.join(paths[start_node][end_ip]['path'])
                 print(f"Shortest path from {start_node} to {end_ip}: {path} (distance: {distance})")
 
     def calculate_next_hop(self, start_node):
         all_shortest_paths = self.calculate_all_shortest_paths()
+        print(f"Next hop for {start_node}:")
+        self.print_all_shortest_paths(all_shortest_paths)
         next_hop = {}
         for end_node in all_shortest_paths[start_node]:
-            if all_shortest_paths[start_node][end_node]['distance'] >= 1:
+            distance = all_shortest_paths[start_node][end_node]['distance']
+            if distance != float('infinity') and distance > 0:
                 path = all_shortest_paths[start_node][end_node]['path']
                 edges = self.get_edges_from_path(path)
+                self.print_edges(edges)
                 next_hop[end_node] = {
                     'ip': edges[0].ip_address,
                     'netmask': edges[0].data['netmask'],

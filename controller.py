@@ -73,6 +73,7 @@ class RouterController(Thread):
         self.arp_timers = [] # timers for ARP entries
         self.routerPorts = [4] # TODO: FIX THIS!
         self.routing_table = RoutingTable()
+        self.router_id = router_id
 
         self.pwospf = PWOSPFRouter(PWOSPF_AREA, router_id)
         for port, intf in self.router.intfs.items():
@@ -81,13 +82,6 @@ class RouterController(Thread):
             netmask = 0xffffffff ^ (1 << 32 - int(intf.prefixLen)) - 1
             self.pwospf.add_interface(intf.IP(), netmask, self.broadcastHELLO, PWOSPF_HELLOINT, port=port, mac=intf.MAC())
             self.pwospf.topodb.add_node(str(router_id), intf.IP())
-
-        if router_id == 1:
-            self.pwospf.topodb.add_node(str(2), '10.0.10.1')
-            self.pwospf.topodb.add_edge(str(router_id), str(2), 1, {'port': 4, 'netmask': 0xffffff00, 'mac': '00:00:00:00:00:bb'}, '10.0.10.1')
-        elif router_id == 2:
-            self.pwospf.topodb.add_node(str(1), '10.0.10.0')
-            self.pwospf.topodb.add_edge(str(router_id), str(1), 1, {'port': 3, 'netmask': 0xffffff00, 'mac': '00:00:00:00:00:aa'}, '10.0.10.0')
         
         # Add each host (with netmask) to topodb
         for i, host in enumerate(hosts, start=1):
@@ -96,26 +90,8 @@ class RouterController(Thread):
             netmask = 0xffffffff ^ (1 << 32 - int(self.router.intfs[i].prefixLen)) - 1
             self.pwospf.topodb.add_edge(str(router_id), host['ip'], 1, {'port': i, 'netmask': netmask, 'mac': host['mac']}, host['ip'])
         
-        # Run Dijkstra's algorithm to calculate next hop for each destination
-        routing_rules = self.pwospf.dijkstra.calculate_next_hop(str(router_id))
-        
-        #  Update routing/ARP tables
-        for dst_ip, rule in routing_rules.items():
-            is_router = rule['router_id'] != None
-            # Routing table entry
-            te = RoutingTableEntry(
-                keyIP=mask_ip_address(dst_ip, rule['netmask']) if is_router else dst_ip,
-                mask=rule['netmask'] if is_router else 0xffffffff,
-                dstIP=rule['ip'],
-                port=rule['port'],
-                priority=rule['port']
-            )
-            self.router.insertTableEntry(**te)
-            self.routing_table.add_entry(te)
-            # ARP table entry
-            if rule['router_id'] != None:
-                self.addMacAddr(rule['mac'], rule['port'])
-                self.addIpAddr(rule['ip'], rule['mac'])
+        # Update routing table
+        self.updateRouting()
 
     def addMacAddr(self, mac, port):
         # Don't re-add the mac-port mapping if we already have it:
@@ -279,8 +255,38 @@ class RouterController(Thread):
         intf = timer.payload['intf']
         neighbor = timer.payload['neighbor']
         intf.remove_neighbor(neighbor)
-        # TODO: Update topodb which will run Dijkstra's and update routing/ARP tables
+        # Update topodb
+        self.pwospf.topodb.remove_edge(str(intf.router_id), str(neighbor.router_id))
+        # Run Dijkstra's and update routing/ARP tables
+        self.updateRouting()
         # TODO: Send LSU with neighbor removed
+
+    def updateRouting(self):
+        # Run Dijkstra's algorithm to calculate next hop for each destination
+        routing_rules = self.pwospf.dijkstra.calculate_next_hop(str(self.router_id))
+        
+        # Reset routing table
+        for te in self.routing_table.get_entries():
+            self.router.removeTableEntry(**te)
+        self.routing_table.reset()
+
+        #  Update routing/ARP tables
+        for dst_ip, rule in routing_rules.items():
+            is_router = rule['router_id'] != None
+            # Routing table entry
+            te = RoutingTableEntry(
+                keyIP=mask_ip_address(dst_ip, rule['netmask']) if is_router else dst_ip,
+                mask=rule['netmask'] if is_router else 0xffffffff,
+                dstIP=rule['ip'],
+                port=rule['port'],
+                priority=rule['port']
+            )
+            self.router.insertTableEntry(**te)
+            self.routing_table.add_entry(te)
+            # ARP table entry
+            if rule['router_id'] != None:
+                self.addMacAddr(rule['mac'], rule['port'])
+                self.addIpAddr(rule['ip'], rule['mac'])
 
     def handlePkt(self, pkt):
         # Ignore IPv6 packets:
@@ -328,7 +334,11 @@ class RouterController(Thread):
                     intf = self.pwospf.find_hello_intf(pkt[CPUMetadata].srcPort, pkt[HELLO].netmask, pkt[HELLO].helloint)
                     if not intf.find_neighbor(pkt[PWOSPF].router_id, pkt[IP].src):
                         intf.add_neighbor(pkt[PWOSPF].router_id, pkt[IP].src, self.removeNeighbor)
-                        # TODO: Update topodb which will run Dijkstra's and update routing/ARP tables
+                        # Update topodb
+                        self.pwospf.topodb.add_node(str(pkt[PWOSPF].router_id), pkt[IP].src)
+                        self.pwospf.topodb.add_edge(str(intf.router_id), str(pkt[PWOSPF].router_id), 1, {'port': pkt[CPUMetadata].srcPort, 'netmask': pkt[HELLO].netmask, 'mac': pkt[Ether].src}, pkt[IP].src)
+                        # Run Dijkstra's and update routing/ARP tables
+                        self.updateRouting()
                         # TODO: Send LSU to all neighbors
                     print('Packet for PWOSPF HELLO from {} arrived at port {} ({})'.format(pkt[Ether].src, pkt[CPUMetadata].srcPort, pkt[Ether].dst))
             elif pkt[CPUMetadata].type == TYPE_DIRECT:

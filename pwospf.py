@@ -1,4 +1,4 @@
-from scapy.fields import ByteField, ShortField, XShortField, IntField, LongField
+from scapy.fields import ByteField, ShortField, XShortField, IntField, XIntField, LongField
 from scapy.packet import Packet, bind_layers
 from scapy.layers.inet import IP
 from scapy.utils import checksum
@@ -40,7 +40,7 @@ class PWOSPF(Packet):
     
 class HELLO(Packet):
     name = "HELLO"
-    fields_desc = [ IntField("netmask", None),
+    fields_desc = [ XIntField("netmask", None),
                     ShortField("helloint", None),
                     ShortField("padding", 0)]
 

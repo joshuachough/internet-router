@@ -76,13 +76,13 @@ print('')
 
 # print(hosts[0][0].cmd("arping -c1 10.0.0.3"))
 
-# print(hosts[0][1].cmd("ping -c1 10.0.2.1"))
+print(hosts[0][1].cmd("ping -c1 10.0.2.1"))
 
-# print(hosts[0][1].cmd("ping -c1 10.0.0.1"))
+print(hosts[0][1].cmd("ping -c1 10.0.0.1"))
 
-# print(hosts[0][1].cmd("ping -c1 10.0.0.4"))
+print(hosts[0][1].cmd("ping -c1 10.0.0.4"))
 
-# print(hosts[0][1].cmd("ping -c1 10.0.0.5"))
+print(hosts[0][1].cmd("ping -c1 10.0.0.5"))
 
 for router in routers:
     router.printTableEntries()

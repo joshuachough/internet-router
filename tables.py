@@ -48,6 +48,9 @@ class Table:
         self.name = name
         self.entries = entries
         self.size = size
+    
+    def __str__(self):
+        return f"Table {self.name}:\n" + '\n'.join([str(entry) for entry in self.entries])
 
     def add_entry(self, entry):
         self.entries.append(entry)
@@ -73,11 +76,10 @@ class Table:
             else:
                 entries.append(entry)
         return entries
-
-    def __str__(self):
-        return f"Table {self.name}:\n" + '\n'.join([str(entry) for entry in self.entries])
+    
+    def reset(self):
+        self.entries = []
     
 class RoutingTable(Table):
     def __init__(self, size=1024, entries=[]):
         super(RoutingTable, self).__init__("MyIngress.routing", size, entries)
-        
