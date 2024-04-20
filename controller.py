@@ -212,19 +212,19 @@ class RouterController(Thread):
         # Ignore packets that the CPU sends:
         if pkt[CPUMetadata].fromCpu == 1: return
 
-        if pkt[CPUMetadata].type == TYPE_ARP and ARP in pkt:
+        if pkt[CPUMetadata].type == TYPE_ARP:
+            assert ARP in pkt, "ARP packets should have ARP layer"
             if pkt[ARP].op == ARP_OP_REQ:
                 self.handleArpRequest(pkt)
             elif pkt[ARP].op == ARP_OP_REPLY:
                 self.handleArpReply(pkt)
         elif IP in pkt:
             if pkt[CPUMetadata].type == TYPE_ARP_MISS:
-                if pkt[CPUMetadata].nextHop != '0.0.0.0':
-                    self.arp_pending_buffer.append(Timer(self.removeArpPendingPkt, {'pkt': pkt}, ARP_PENDING_TIMEOUT).start())
-                    self.createArpRequest(pkt)
-                else:
-                    print('#Error: Missing next hop')
-            elif pkt[CPUMetadata].type == TYPE_ARP_HIT and pkt[CPUMetadata].arpHitNotified == 0:
+                assert pkt[CPUMetadata].nextHop != '0.0.0.0', "Missing next hop"
+                self.arp_pending_buffer.append(Timer(self.removeArpPendingPkt, {'pkt': pkt}, ARP_PENDING_TIMEOUT).start())
+                self.createArpRequest(pkt)
+            elif pkt[CPUMetadata].type == TYPE_ARP_HIT:
+                assert pkt[CPUMetadata].arpHitNotified == 0, "ARP hit should only be notified once"
                 for timer in self.arp_timers:
                     table_entry = timer.payload['table_entry']
                     nextHop = table_entry['match_fields']['meta.nextHop'][0]
@@ -235,13 +235,17 @@ class RouterController(Thread):
             elif pkt[CPUMetadata].type == TYPE_ROUTER_MISS:
                 self.createICMPUnreachable(pkt, ICMP_C_NET_UNREACH)
             elif pkt[CPUMetadata].type == TYPE_PWOSPF_HELLO:
+                assert PWOSPF in pkt, "PWOSPF packets should have PWOSPF layer"
+                assert HELLO in pkt, "PWOSPF HELLO packets should have HELLO layer"
                 # TODO: Handle packets for PWOSPF HELLO
                 print('Packet for PWOSPF HELLO from {} arrived at port {} ({})'.format(pkt[Ether].src, pkt[CPUMetadata].srcPort, pkt[Ether].dst))
             elif pkt[CPUMetadata].type == TYPE_DIRECT:
-                if pkt[IP].proto == IP_PROTO_ICMP and ICMP in pkt:
+                if pkt[IP].proto == IP_PROTO_ICMP:
+                    assert ICMP in pkt, "ICMP packets should have ICMP layer"
                     if pkt[ICMP].type == ICMP_T_ECHO_REQ:
                         self.createICMPEchoReply(pkt)
                 elif pkt[IP].proto == IP_PROTO_PWOPSF:
+                    assert PWOSPF in pkt, "PWOSPF packets should have PWOSPF layer"
                     # TODO: Handle packets for PWOSPF LSU
                     print('Packet for PWOSPF LSU')
 
