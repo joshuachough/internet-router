@@ -66,6 +66,13 @@ class PWOSPFRouter:
             if intf.port == port and intf.netmask == netmask and intf.helloint == helloint:
                 return intf
         return None
+    
+    def get_neighbor_ports(self):
+        ports = []
+        for intf in self.interfaces:
+            if intf.has_neighbor():
+                ports.append(intf.port)
+        return ports
 
 class PWOSPFInterface:
     def __init__(self, router, ip, netmask, hello_bcast, helloint=10, port=None, mac=None):
@@ -80,6 +87,9 @@ class PWOSPFInterface:
         self.mac = mac
 
         self.hello_bcast_timer = Timer(hello_bcast, {'intf': self}, self.helloint).start()
+
+    def has_neighbor(self):
+        return len(self.neighbors) > 0
 
     def add_neighbor(self, rid, ip, hello_dead):
         neighbor = PWOSPFNeighbor(self, rid, ip, hello_dead, self.helloint*3)

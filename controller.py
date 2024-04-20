@@ -71,7 +71,6 @@ class RouterController(Thread):
         self.stop_event = Event()
         self.arp_pending_buffer = [] # buffer for packets waiting on ARP resolution
         self.arp_timers = [] # timers for ARP entries
-        self.routerPorts = [4] # TODO: FIX THIS!
         self.routing_table = RoutingTable()
         self.router_id = router_id
 
@@ -137,8 +136,9 @@ class RouterController(Thread):
 
     def createArpRequest(self, pkt):
         destIp, srcIp, srcPort = pkt[CPUMetadata].nextHop, pkt[IP].src, pkt[CPUMetadata].srcPort
+        routerPorts = self.pwospf.get_neighbor_ports()
         for i in range(2, len(self.router.intfs)):
-            if i == srcPort or i in self.routerPorts: continue
+            if i == srcPort or i in routerPorts: continue
             srcAddr = self.router.intfs[i].MAC()
             pkt = Ether(dst='ff:ff:ff:ff:ff:ff', src=srcAddr, type=TYPE_CPU_METADATA) / CPUMetadata(origEtherType=TYPE_ARP, srcPort=1, forward=1, egressPort=i) / ARP(
                 op=ARP_OP_REQ,
