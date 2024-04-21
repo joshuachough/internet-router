@@ -26,8 +26,8 @@ const bit<16> TYPE_ARP_HIT      = 0x0008;
 const bit<8> TYPE_ICMP          = 1;
 const bit<8> TYPE_PWOSPF        = 89;
 
-const bit<8> TYPE_HELLO         = 1;
-const bit<8> TYPE_LSU           = 4;
+const bit<8> PWOSPF_TYPE_HELLO  = 1;
+const bit<8> PWOSPF_TYPE_LSU    = 4;
 
 const bit<32> NUM_COUNTERS      = 3;
 const bit<32> ARP_COUNTER       = 0;
@@ -103,6 +103,12 @@ header hello_t {
     bit<16> padding;
 }
 
+header lsu_t {
+    bit<16> seqNum;
+    bit<16> ttl;
+    bit<32> numAds;
+}
+
 struct headers {
     ethernet_t        ethernet;
     cpu_metadata_t    cpu_metadata;
@@ -111,6 +117,7 @@ struct headers {
     icmp_t            icmp;
     pwospf_t          pwospf;
     hello_t           hello;
+    lsu_t             lsu;
 }
 
 struct metadata {
@@ -173,13 +180,19 @@ parser MyParser(packet_in packet,
     state parse_pwospf {
         packet.extract(hdr.pwospf);
         transition select(hdr.pwospf.type) {
-            TYPE_HELLO: parse_hello;
+            PWOSPF_TYPE_HELLO: parse_hello;
+            PWOSPF_TYPE_LSU: parse_lsu;
             default: accept;
         }
     }
 
     state parse_hello {
         packet.extract(hdr.hello);
+        transition accept;
+    }
+
+    state parse_lsu {
+        packet.extract(hdr.lsu);
         transition accept;
     }
 }
@@ -257,7 +270,6 @@ control MyIngress(inout headers hdr,
     action ipv4_forward(macAddr_t dstAddr, macAddr_t srcAddr) {
         hdr.ethernet.srcAddr = srcAddr;
         hdr.ethernet.dstAddr = dstAddr;
-        hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
         meta.countIp = 1;
     }
 
@@ -311,6 +323,13 @@ control MyIngress(inout headers hdr,
     apply {
         initMeta();
 
+        if (hdr.ipv4.isValid() && (hdr.ipv4.ttl == 1 || hdr.ipv4.ttl == 0)) {
+            drop();
+        }
+        if (hdr.lsu.isValid() && (hdr.lsu.ttl == 1 || hdr.lsu.ttl == 0)) {
+            drop();
+        }
+
         if (standard_metadata.ingress_port == CPU_PORT) {
             if (hdr.cpu_metadata.isValid()) {
                 // If the controller enabled forwarding, bypass routing
@@ -330,16 +349,12 @@ control MyIngress(inout headers hdr,
                 send_to_cpu(TYPE_ARP);
             }
             else if (hdr.ipv4.isValid()) {
-                if (hdr.ipv4.ttl == 0)
-                    drop();
-
                 if (local.apply().miss) {
                     if (routing.apply().hit) {
                         if (arp.apply().hit && meta.arpHitNotified == 0) {
                             // Undo ipv4_forward action
                             hdr.ethernet.srcAddr = meta.origSrcAddr;
                             hdr.ethernet.dstAddr = meta.origDstAddr;
-                            hdr.ipv4.ttl = hdr.ipv4.ttl + 1;
                             // Send the packet to the CPU to notify arp hit
                             send_to_cpu(TYPE_ARP_HIT);
                             hdr.cpu_metadata.nextHop = meta.nextHop;
@@ -368,7 +383,16 @@ control MyIngress(inout headers hdr,
 control MyEgress(inout headers hdr,
                  inout metadata meta,
                  inout standard_metadata_t standard_metadata) {
-    apply { }
+    apply {
+        if (standard_metadata.egress_spec != CPU_PORT) {
+            if (hdr.ipv4.isValid()) {
+                hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
+            }
+            if (hdr.lsu.isValid()) {
+                hdr.lsu.ttl = hdr.lsu.ttl - 1;
+            }
+        }
+    }
 }
 
 control MyComputeChecksum(inout headers  hdr, inout metadata meta) {
@@ -398,6 +422,7 @@ control MyDeparser(packet_out packet, in headers hdr) {
         packet.emit(hdr.icmp);
         packet.emit(hdr.pwospf);
         packet.emit(hdr.hello);
+        packet.emit(hdr.lsu);
     }
 }
 

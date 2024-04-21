@@ -18,7 +18,6 @@ IP_COUNTER          = 1
 CTRL_COUNTER        = 2
 
 ALLSPFRouters = "224.0.0.5"
-RouterControllerIP = "10.0.0.1"
 
 topo = MyTopology()
 net = P4Mininet(program="router.p4", topo=topo, auto_arp=False)
@@ -49,9 +48,13 @@ routers[1].intfs[link["port2"]].config(mac=link["r2mac"], ip=link["r2ip"])
 # routers[0].insertTableEntry(**RoutingTableEntry(keyIP="10.0.0.4", dstIP="10.0.0.4", port=4, priority=4))
 
 # Add local IP rules
-for router in routers:
+for i, router in enumerate(routers):
     router.insertTableEntry(**LocalTableEntry(dstIP=ALLSPFRouters, t=TYPE_PWOSPF_HELLO))
-    router.insertTableEntry(**LocalTableEntry(dstIP=RouterControllerIP, t=TYPE_DIRECT))
+    router.insertTableEntry(**LocalTableEntry(dstIP=controllers[i].IP(), t=TYPE_DIRECT))
+    # Add local IP rules for interfaces (for PWOSPF LSU)
+    for j, intf in enumerate(router.intfs.values()):
+        if j == 0 or j == 1: continue
+        router.insertTableEntry(**LocalTableEntry(dstIP=intf.IP(), t=TYPE_PWOSPF_LSU))
 
 # Start the router controllers
 cpus = [RouterController(routers[i], i+1, topology["routers"][i]["hosts"]) for i in range(len(routers))]
@@ -66,7 +69,6 @@ for i, router in enumerate(routers):
     print(router.intfs)
     for intf in router.intfs.values():
         print(intf.name, intf.MAC(), intf.IP(), intf.prefixLen)
-        
     print(controllers[i].name, controllers[i].MAC(), controllers[i].IP())
     for host in hosts[i]:
         print(host.name, host.MAC(), host.IP())

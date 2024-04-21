@@ -1,4 +1,4 @@
-from scapy.fields import ByteField, ShortField, XShortField, IntField, XIntField, LongField
+from scapy.fields import ByteField, ShortField, XShortField, IntField, XIntField, LongField, PacketListField, IPField
 from scapy.packet import Packet, bind_layers
 from scapy.layers.inet import IP
 from scapy.utils import checksum
@@ -43,12 +43,26 @@ class HELLO(Packet):
     fields_desc = [ XIntField("netmask", None),
                     ShortField("helloint", None),
                     ShortField("padding", 0)]
+    
+class LSA(Packet):
+    name = "LSA"
+    fields_desc = [ IPField("subnet", None),
+                    IPField("mask", None),
+                    IntField("router_id", None)]
+
+class LSU(Packet):
+    name = "LSU"
+    fields_desc = [ ShortField("seq", None),
+                    ShortField("ttl", 64),
+                    IntField("num_ads", None),
+                    PacketListField("ads", [], LSA, count_from=lambda pkt: pkt.num_ads)]
 
 bind_layers(IP, PWOSPF, proto=IP_PROTO_PWOPSF)
 bind_layers(PWOSPF, HELLO, type=PWOSPF_TYPE_HELLO)
+bind_layers(PWOSPF, LSU, type=PWOSPF_TYPE_LSU)
 
 class PWOSPFRouter:
-    def __init__(self, area_id, router_id, lsuint=30, interfaces=None):
+    def __init__(self, area_id, router_id, lsu_bcast, lsuint=30, interfaces=None):
         self.area_id = area_id
         self.router_id = router_id
         self.lsuint = lsuint
@@ -56,7 +70,9 @@ class PWOSPFRouter:
 
         self.topodb = Graph()
         self.dijkstra = Dijkstra(self.topodb)
+        self.seq = 0
 
+        self.lsu_bcast_timer = Timer(lsu_bcast, {'router': self}, self.lsuint).start()
 
     def add_interface(self, *args, **kwargs):
         interface = PWOSPFInterface(self, *args, **kwargs)
@@ -79,6 +95,10 @@ class PWOSPFRouter:
         print(f"Router {self.router_id} in area {self.area_id} has the following interfaces:")
         for intf in self.interfaces:
             print(f"\tInterface {intf.ip} on port {intf.port}")
+
+    def get_new_seq(self):
+        self.seq += 1
+        return self.seq
 
 class PWOSPFInterface:
     def __init__(self, router, ip, netmask, hello_bcast, helloint=10, port=None, mac=None):

@@ -2,10 +2,10 @@ import heapq
 
 class Edge:
     def __init__(self, to, weight, data, ip_address):
-        self.to = to
+        self.to = str(to)
         self.weight = weight
         self.data = data
-        self.ip_address = ip_address
+        self.ip_address = str(ip_address)
 
 class Graph:
     def __init__(self):
@@ -13,24 +13,31 @@ class Graph:
         self.ip_to_node = {}
 
     def add_node(self, node, ip_address):
+        node, ip_address = str(node), str(ip_address)
         self.adjacency_list[node] = []
         self.ip_to_node[ip_address] = node
 
     def add_edge(self, from_node, to_node, weight, data, ip_address):
+        from_node = str(from_node)
         edge = Edge(to_node, weight, data, ip_address)
         self.adjacency_list[from_node].append(edge)
 
     def remove_edge(self, from_node, to_node):
+        from_node, to_node = str(from_node), str(to_node)
         for edge in self.adjacency_list[from_node]:
             if edge.to == to_node:
                 self.adjacency_list[from_node].remove(edge)
                 break
 
+    def get_adjs(self, node):
+        node = str(node)
+        return self.adjacency_list[node]
+
     def print_graph(self):
         for node in self.adjacency_list:
             edges = []
             for edge in self.adjacency_list[node]:
-                edges.append(f"{edge.to}({edge.weight})")
+                edges.append(f"{edge.to} of type {type(edge.to)} ({edge.weight})")
             print(f"{node}: {' '.join(edges)}")
 
 class Dijkstra:
@@ -38,6 +45,7 @@ class Dijkstra:
         self.graph = graph
 
     def calculate_shortest_path(self, start_node, end_ip):
+        start_node, end_ip = str(start_node), str(end_ip)
         end_node = self.graph.ip_to_node[end_ip]
         shortest_distances = {node: float('infinity') for node in self.graph.adjacency_list}
         previous_nodes = {node: None for node in self.graph.adjacency_list}
@@ -104,16 +112,14 @@ class Dijkstra:
                 print(f"Shortest path from {start_node} to {end_ip}: {path} (distance: {distance})")
 
     def calculate_next_hop(self, start_node):
+        start_node = str(start_node)
         all_shortest_paths = self.calculate_all_shortest_paths()
-        print(f"Next hop for {start_node}:")
-        self.print_all_shortest_paths(all_shortest_paths)
         next_hop = {}
         for end_node in all_shortest_paths[start_node]:
             distance = all_shortest_paths[start_node][end_node]['distance']
             if distance != float('infinity') and distance > 0:
                 path = all_shortest_paths[start_node][end_node]['path']
                 edges = self.get_edges_from_path(path)
-                self.print_edges(edges)
                 next_hop[end_node] = {
                     'ip': edges[0].ip_address,
                     'netmask': edges[0].data['netmask'],
