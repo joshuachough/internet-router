@@ -125,6 +125,6 @@ class Dijkstra:
                     'netmask': edges[0].data['netmask'],
                     'port': edges[0].data['port'],
                     'mac': edges[0].data['mac'],
-                    'router_id': edges[0].to if edges[0].data['is_router'] else None
+                    'is_router': edges[-1].data['is_router']
                 }
         return next_hop

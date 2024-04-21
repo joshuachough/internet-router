@@ -99,7 +99,9 @@ class RouterController(Thread):
 
     def addIpAddr(self, ip, mac):
         # Don't re-add the ip-mac mapping if we already have it:
+        print('Checking if {} in arp'.format(ip))
         if ip in self.mac_for_ip: return
+        print('Adding {} to arp'.format(ip))
         self.addArpEntry(ip, mac)
         self.mac_for_ip[ip] = mac
 
@@ -335,12 +337,11 @@ class RouterController(Thread):
 
         #  Update routing/ARP tables
         for dst_ip, rule in routing_rules.items():
-            is_router = rule['router_id'] != None
-            # print('Next hop for {} is {} (router? = {})'.format(dst_ip, rule['ip'], is_router))
+            print('{}: Next hop for {} is {} (router? = {})'.format(self.pwospf.router_id, dst_ip, rule['ip'], rule['is_router']))
             # Routing table entry
             te = RoutingTableEntry(
-                keyIP=mask_ip_address(dst_ip, rule['netmask']) if is_router else dst_ip,
-                mask=rule['netmask'] if is_router else 0xffffffff,
+                keyIP=mask_ip_address(dst_ip, rule['netmask']) if rule['is_router'] else dst_ip,
+                mask=rule['netmask'] if rule['is_router'] else 0xffffffff,
                 dstIP=rule['ip'],
                 port=rule['port'],
                 priority=rule['port']
@@ -348,9 +349,9 @@ class RouterController(Thread):
             self.router.insertTableEntry(**te)
             self.routing_table.add_entry(te)
             # ARP table entry
-            if rule['router_id'] != None:
-                self.addMacAddr(rule['mac'], rule['port'])
-                self.addIpAddr(rule['ip'], rule['mac'])
+            # if rule['is_router']:
+            self.addMacAddr(rule['mac'], rule['port'])
+            self.addIpAddr(dst_ip, rule['mac'])
 
     def parseLSU(self, pkt):
         router_id = pkt[PWOSPF].router_id
@@ -437,8 +438,8 @@ class RouterController(Thread):
                         self.broadcastLSU(self.pwospf.interfaces, srcPort=pkt[CPUMetadata].srcPort, srcIp=pkt[IP].src)
                         self.pwospf.lsu_bcast_timer.reset()
                     print('Packet for PWOSPF HELLO from {} arrived at port {} ({})'.format(pkt[Ether].src, pkt[CPUMetadata].srcPort, pkt[Ether].dst))
-                    # if self.pwospf.router_id == 1:
-                    #     self.router.printTableEntries()
+                    if self.pwospf.router_id == 1:
+                        self.router.printTableEntries()
             elif pkt[CPUMetadata].type == TYPE_PWOSPF_LSU:
                 if pkt[IP].proto == IP_PROTO_PWOPSF:
                     if self.verifyPWOSPF(pkt) and self.verifyLSU(pkt):
