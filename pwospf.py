@@ -78,9 +78,9 @@ class PWOSPFRouter:
         interface = PWOSPFInterface(self, *args, **kwargs)
         self.interfaces.append(interface)
 
-    def find_hello_intf(self, port, netmask, helloint):
+    def find_intf_from_port(self, port):
         for intf in self.interfaces:
-            if intf.port == port and intf.netmask == netmask and intf.helloint == helloint:
+            if intf.port == port:
                 return intf
         return None
     
@@ -114,6 +114,8 @@ class PWOSPFInterface:
 
         self.hello_bcast_timer = Timer(hello_bcast, {'intf': self}, self.helloint).start()
 
+        self.seq = 0
+
     def has_neighbor(self):
         return len(self.neighbors) > 0
 
@@ -131,6 +133,14 @@ class PWOSPFInterface:
     def remove_neighbor(self, neighbor):
         self.neighbors.remove(neighbor)
         print('Neighbor {} ({}) removed from router {}\'s interface {}'.format(neighbor.router_id, neighbor.ip, self.router_id, self.ip))
+
+    def update_seq(self, seq):
+        self.seq = seq
+
+    def check_seq_stale(self, seq):
+        if seq <= self.seq:
+            return True
+        return False
 
 class PWOSPFNeighbor:
     def __init__(self, intf, router_id, ip, hello_dead, hello_dead_int):

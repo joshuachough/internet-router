@@ -8,6 +8,8 @@ from controller import RouterController
 from my_topo import MyTopology, topology
 from tables import RoutingTableEntry, LocalTableEntry
 
+import time
+
 TYPE_PWOSPF_HELLO   = 0x000b
 TYPE_PWOSPF_LSU     = 0x000a
 TYPE_DIRECT         = 0x0009
@@ -63,31 +65,39 @@ for cpu in cpus:
 
 # CLI(net)
 
-# Print topology information
-print('\n----- Printing topology information -----')
-for i, router in enumerate(routers):
-    print(router.intfs)
-    for intf in router.intfs.values():
-        print(intf.name, intf.MAC(), intf.IP(), intf.prefixLen)
-    print(controllers[i].name, controllers[i].MAC(), controllers[i].IP())
-    for host in hosts[i]:
-        print(host.name, host.MAC(), host.IP())
-print('')
+# # Print topology information
+# print('\n----- Printing topology information -----')
+# for i, router in enumerate(routers):
+#     print(router.intfs)
+#     for intf in router.intfs.values():
+#         print(intf.name, intf.MAC(), intf.IP(), intf.prefixLen)
+#     print(controllers[i].name, controllers[i].MAC(), controllers[i].IP())
+#     for host in hosts[i]:
+#         print(host.name, host.MAC(), host.IP())
+# print('')
 
 # TODO: organize for testing presentation
 
 # print(hosts[0][0].cmd("arping -c1 10.0.0.3"))
 
-print(hosts[0][1].cmd("ping -c1 10.0.2.1"))
+# # Ping other hosts
+# print(hosts[0][1].cmd("ping -c1 10.0.2.1"))
+# print(hosts[0][1].cmd("ping -c1 10.0.4.1"))
+time.sleep(11)
+print(hosts[0][1].cmd("ping -c1 10.0.5.1"))
 
-print(hosts[0][1].cmd("ping -c1 10.0.0.1"))
+# # Ping router controllers
+# print(hosts[0][1].cmd("ping -c1 10.0.0.1"))
+# print(hosts[1][0].cmd("ping -c1 10.0.4.1"))
 
-print(hosts[0][1].cmd("ping -c1 10.0.0.4"))
+# # Ping fake route in routing table
+# print(hosts[0][1].cmd("ping -c1 10.0.0.4"))
 
-print(hosts[0][1].cmd("ping -c1 10.0.0.5"))
+# # Ping route that doesn't exist
+# print(hosts[0][1].cmd("ping -c1 10.0.0.5"))
 
-for router in routers:
-    router.printTableEntries()
+# for router in routers:
+#     router.printTableEntries()
 
 # # Print packet counters
 # print('\n----- Printing r1 packetCounters -----')
