@@ -6,7 +6,7 @@ from scapy.compat import raw
 
 from async_sniff import sniff
 from cpu_metadata import CPUMetadata
-from pwospf import PWOSPF, HELLO, PWOSPFRouter
+from pwospf import PWOSPF, HELLO, LSU, LSA, PWOSPFRouter
 from tables import ArpTableEntry, RoutingTableEntry, RoutingTable
 from timers import Timer
 
@@ -31,6 +31,7 @@ PWOSPF_TYPE_LSU     = 4
 PWOSPF_HELLO_LEN    = 32
 PWOSPF_AREA         = 1
 PWOSPF_HELLOINT     = 5
+PWOSPF_LSUINT       = 10
 
 TYPE_ARP            = 0x0806
 TYPE_CPU_METADATA   = 0x080a
@@ -49,8 +50,8 @@ ARP_COUNTER         = 0
 IP_COUNTER          = 1
 CTRL_COUNTER        = 2
 
-ARP_PENDING_TIMEOUT = 5
-ARP_TE_TIMEOUT      = 10
+ARP_PENDING_TIMEOUT = 20
+ARP_TE_TIMEOUT      = 60
 
 ALLSPFRouters       = "224.0.0.5"
 
@@ -71,51 +72,25 @@ class RouterController(Thread):
         self.stop_event = Event()
         self.arp_pending_buffer = [] # buffer for packets waiting on ARP resolution
         self.arp_timers = [] # timers for ARP entries
-        self.routerPorts = [4] # TODO: FIX THIS!
         self.routing_table = RoutingTable()
 
-        self.pwospf = PWOSPFRouter(PWOSPF_AREA, router_id)
+        self.pwospf = PWOSPFRouter(PWOSPF_AREA, router_id, self.broadcastLSUWrapper, PWOSPF_LSUINT)
         for port, intf in self.router.intfs.items():
             if port == 0 or port == 1: continue
             # Change prefix (24) into netmask (0xffffff00)
             netmask = 0xffffffff ^ (1 << 32 - int(intf.prefixLen)) - 1
             self.pwospf.add_interface(intf.IP(), netmask, self.broadcastHELLO, PWOSPF_HELLOINT, port=port, mac=intf.MAC())
-            self.pwospf.topodb.add_node(str(router_id), intf.IP())
-
-        if router_id == 1:
-            self.pwospf.topodb.add_node(str(2), '10.0.10.1')
-            self.pwospf.topodb.add_edge(str(router_id), str(2), 1, {'port': 4, 'netmask': 0xffffff00, 'mac': '00:00:00:00:00:bb'}, '10.0.10.1')
-        elif router_id == 2:
-            self.pwospf.topodb.add_node(str(1), '10.0.10.0')
-            self.pwospf.topodb.add_edge(str(router_id), str(1), 1, {'port': 3, 'netmask': 0xffffff00, 'mac': '00:00:00:00:00:aa'}, '10.0.10.0')
+            self.pwospf.topodb.add_node(router_id, intf.IP())
         
         # Add each host (with netmask) to topodb
         for i, host in enumerate(hosts, start=1):
             if host['name'][0] == 'c': continue
             self.pwospf.topodb.add_node(host['ip'], host['ip'])
             netmask = 0xffffffff ^ (1 << 32 - int(self.router.intfs[i].prefixLen)) - 1
-            self.pwospf.topodb.add_edge(str(router_id), host['ip'], 1, {'port': i, 'netmask': netmask, 'mac': host['mac']}, host['ip'])
+            self.pwospf.topodb.add_edge(router_id, host['ip'], 1, {'port': i, 'netmask': netmask, 'mac': host['mac'], 'is_router': False}, host['ip'])
         
-        # Run Dijkstra's algorithm to calculate next hop for each destination
-        routing_rules = self.pwospf.dijkstra.calculate_next_hop(str(router_id))
-        
-        #  Update routing/ARP tables
-        for dst_ip, rule in routing_rules.items():
-            is_router = rule['router_id'] != None
-            # Routing table entry
-            te = RoutingTableEntry(
-                keyIP=mask_ip_address(dst_ip, rule['netmask']) if is_router else dst_ip,
-                mask=rule['netmask'] if is_router else 0xffffffff,
-                dstIP=rule['ip'],
-                port=rule['port'],
-                priority=rule['port']
-            )
-            self.router.insertTableEntry(**te)
-            self.routing_table.add_entry(te)
-            # ARP table entry
-            if rule['router_id'] != None:
-                self.addMacAddr(rule['mac'], rule['port'])
-                self.addIpAddr(rule['ip'], rule['mac'])
+        # Update routing table
+        self.updateRouting()
 
     def addMacAddr(self, mac, port):
         # Don't re-add the mac-port mapping if we already have it:
@@ -161,8 +136,9 @@ class RouterController(Thread):
 
     def createArpRequest(self, pkt):
         destIp, srcIp, srcPort = pkt[CPUMetadata].nextHop, pkt[IP].src, pkt[CPUMetadata].srcPort
+        routerPorts = self.pwospf.get_neighbor_ports()
         for i in range(2, len(self.router.intfs)):
-            if i == srcPort or i in self.routerPorts: continue
+            if i == srcPort or i in routerPorts: continue
             srcAddr = self.router.intfs[i].MAC()
             pkt = Ether(dst='ff:ff:ff:ff:ff:ff', src=srcAddr, type=TYPE_CPU_METADATA) / CPUMetadata(origEtherType=TYPE_ARP, srcPort=1, forward=1, egressPort=i) / ARP(
                 op=ARP_OP_REQ,
@@ -242,6 +218,54 @@ class RouterController(Thread):
         self.send(pkt)
         timer.reset()
 
+    def broadcastLSUWrapper(self, timer):
+        router = timer.payload['router']
+        self.broadcastLSU(router.interfaces)
+        timer.reset()
+
+    def generateLSAs(self):
+        # Loop through all edges in topodb and generate LSAs
+        lsa_list = []
+        for edge in self.pwospf.topodb.get_adjs(self.pwospf.router_id):
+            router_id = edge.to if '.' not in edge.to else 0
+            lsa = LSA(
+                subnet=edge.ip_address,
+                mask=edge.data['netmask'],
+                router_id=int(router_id))
+            lsa_list.append(lsa)
+        return lsa_list
+
+    def broadcastLSU(self, intfs, pkt=None, srcPort=None, srcIp=None):
+        if pkt == None:
+            seq = self.pwospf.get_new_seq()
+            lsa_list = self.generateLSAs()
+        for intf in intfs:
+            for neighbor in intf.neighbors:
+                if intf.port == srcPort and neighbor.ip == srcIp: continue
+                if pkt == None:
+                    pkt = Ether(
+                        dst='ff:ff:ff:ff:ff:ff',
+                        src=intf.mac,
+                        type=TYPE_CPU_METADATA
+                        ) / CPUMetadata(
+                            origEtherType=TYPE_IPV4,
+                            srcPort=1,
+                            forward=1,
+                            egressPort=intf.port
+                            ) / IP(
+                                dst=neighbor.ip,
+                                src=intf.ip,
+                                proto=IP_PROTO_PWOPSF
+                                ) / PWOSPF(
+                                    type=PWOSPF_TYPE_LSU,
+                                    router_id=intf.router_id,
+                                    area_id=intf.area_id
+                                    ) / LSU(
+                                        seq=seq,
+                                        num_ads=len(lsa_list),
+                                        ads=lsa_list)
+                self.send(pkt)
+
     def verifyPWOSPF(self, pkt):
         if PWOSPF not in pkt:
             print("#Warning: PWOSPF packets should have PWOSPF layer")
@@ -261,17 +285,30 @@ class RouterController(Thread):
         if pkt[PWOSPF].chksum == 0:
             print("#Warning: PWOSPF checksum should not be 0")
             return False
-        if pkt[PWOSPF].length != PWOSPF_HELLO_LEN:
-            print("#Warning: PWOSPF length should be 32")
-            return False
         return True
 
     def verifyHELLO(self, pkt):
         if HELLO not in pkt:
             print("#Warning: PWOSPF HELLO packets should have HELLO layer")
             return False
-        if self.pwospf.find_hello_intf(pkt[CPUMetadata].srcPort, pkt[HELLO].netmask, pkt[HELLO].helloint) == None:
-            print("#Warning: HELLO packet should match router's interface")
+        if pkt[PWOSPF].length != PWOSPF_HELLO_LEN:
+            print("#Warning: PWOSPF HELLO length should be 32")
+            return False
+        intf = self.pwospf.find_intf_from_port(pkt[CPUMetadata].srcPort)
+        if intf.netmask != pkt[HELLO].netmask:
+            print("#Warning: PWOSPF HELLO packet should match router's netmask")
+            return False
+        if intf.helloint != pkt[HELLO].helloint:
+            print("#Warning: PWOSPF HELLO packet should match router's helloint")
+            return False
+        return True
+    
+    def verifyLSU(self, pkt):
+        if LSU not in pkt:
+            print("#Warning: PWOSPF LSU packets should have LSU layer")
+            return False
+        if pkt[PWOSPF].router_id == self.pwospf.router_id:
+            print("#Warning: PWOSPF LSU packet should not be from the same router")
             return False
         return True
     
@@ -279,9 +316,72 @@ class RouterController(Thread):
         intf = timer.payload['intf']
         neighbor = timer.payload['neighbor']
         intf.remove_neighbor(neighbor)
-        # TODO: Update topodb which will run Dijkstra's and update routing/ARP tables
-        # TODO: Send LSU with neighbor removed
+        # Update topodb
+        self.pwospf.topodb.remove_edge(intf.router_id, neighbor.router_id)
+        # Run Dijkstra's and update routing/ARP tables
+        self.updateRouting()
+        # Send LSU to all neighbors
+        self.broadcastLSU(self.pwospf.interfaces)
+        self.pwospf.lsu_bcast_timer.reset()
 
+    def updateRouting(self):
+        # Run Dijkstra's algorithm to calculate next hop for each destination
+        routing_rules = self.pwospf.dijkstra.calculate_next_hop(self.pwospf.router_id)
+        
+        # Reset routing table
+        for te in self.routing_table.get_entries():
+            self.router.removeTableEntry(**te)
+        self.routing_table.reset()
+
+        #  Update routing/ARP tables
+        for dst_ip, rule in routing_rules.items():
+            is_router = rule['router_id'] != None
+            # print('Next hop for {} is {} (router? = {})'.format(dst_ip, rule['ip'], is_router))
+            # Routing table entry
+            te = RoutingTableEntry(
+                keyIP=mask_ip_address(dst_ip, rule['netmask']) if is_router else dst_ip,
+                mask=rule['netmask'] if is_router else 0xffffffff,
+                dstIP=rule['ip'],
+                port=rule['port'],
+                priority=rule['port']
+            )
+            self.router.insertTableEntry(**te)
+            self.routing_table.add_entry(te)
+            # ARP table entry
+            if rule['router_id'] != None:
+                self.addMacAddr(rule['mac'], rule['port'])
+                self.addIpAddr(rule['ip'], rule['mac'])
+
+    def parseLSU(self, pkt):
+        router_id = pkt[PWOSPF].router_id
+        update = False
+        for lsa in pkt[LSU].ads:
+            found = False
+            for edge in self.pwospf.topodb.get_adjs(router_id):
+                if edge.ip_address == lsa.subnet:
+                    found = True
+                    # TODO: reset timer for edge if dynamic
+                    if edge.data['netmask'] != lsa.mask:
+                        edge.data['netmask'] = lsa.mask
+                        update = True
+                    if lsa.router_id == 0:
+                        if edge.to != edge.ip_address:
+                            edge.to = edge.ip_address
+                            update = True
+                    else:
+                        if edge.to != lsa.router_id:
+                            edge.to = lsa.router_id
+                            update = True
+            if not found:
+                # Add node and edge to topodb
+                is_router = lsa.router_id != 0
+                node = lsa.router_id if is_router else lsa.subnet
+                self.pwospf.topodb.add_node(node, lsa.subnet)
+                self.pwospf.topodb.add_edge(router_id, node, 1, {'port': pkt[CPUMetadata].srcPort, 'netmask': lsa.mask, 'mac': pkt[Ether].src, 'is_router': is_router}, lsa.subnet)
+                update = True
+        if update:
+            self.updateRouting()
+            
     def handlePkt(self, pkt):
         # Ignore IPv6 packets:
         if Ether in pkt and pkt[Ether].type == TYPE_IPV6: return
@@ -325,21 +425,34 @@ class RouterController(Thread):
                 self.createICMPUnreachable(pkt, ICMP_C_NET_UNREACH)
             elif pkt[CPUMetadata].type == TYPE_PWOSPF_HELLO:
                 if self.verifyPWOSPF(pkt) and self.verifyHELLO(pkt):
-                    intf = self.pwospf.find_hello_intf(pkt[CPUMetadata].srcPort, pkt[HELLO].netmask, pkt[HELLO].helloint)
+                    intf = self.pwospf.find_intf_from_port(pkt[CPUMetadata].srcPort)
                     if not intf.find_neighbor(pkt[PWOSPF].router_id, pkt[IP].src):
                         intf.add_neighbor(pkt[PWOSPF].router_id, pkt[IP].src, self.removeNeighbor)
-                        # TODO: Update topodb which will run Dijkstra's and update routing/ARP tables
-                        # TODO: Send LSU to all neighbors
+                        # Update topodb
+                        self.pwospf.topodb.add_node(pkt[PWOSPF].router_id, pkt[IP].src)
+                        self.pwospf.topodb.add_edge(intf.router_id, pkt[PWOSPF].router_id, 1, {'port': pkt[CPUMetadata].srcPort, 'netmask': pkt[HELLO].netmask, 'mac': pkt[Ether].src, 'is_router': True}, pkt[IP].src)
+                        # Run Dijkstra's and update routing/ARP tables
+                        self.updateRouting()
+                        # Send LSU to all neighbors except the one that sent the HELLO
+                        self.broadcastLSU(self.pwospf.interfaces, srcPort=pkt[CPUMetadata].srcPort, srcIp=pkt[IP].src)
+                        self.pwospf.lsu_bcast_timer.reset()
                     print('Packet for PWOSPF HELLO from {} arrived at port {} ({})'.format(pkt[Ether].src, pkt[CPUMetadata].srcPort, pkt[Ether].dst))
+                    # if self.pwospf.router_id == 1:
+                    #     self.router.printTableEntries()
+            elif pkt[CPUMetadata].type == TYPE_PWOSPF_LSU:
+                if pkt[IP].proto == IP_PROTO_PWOPSF:
+                    if self.verifyPWOSPF(pkt) and self.verifyLSU(pkt):
+                        intf = self.pwospf.find_intf_from_port(pkt[CPUMetadata].srcPort)
+                        if intf.check_seq_stale(pkt[LSU].seq): return
+                        intf.update_seq(pkt[LSU].seq)
+                        print('New packet for PWOSPF LSU (seq={}) from {} arrived at port {} ({})'.format(pkt[LSU].seq, pkt[Ether].src, pkt[CPUMetadata].srcPort, pkt[Ether].dst))
+                        self.parseLSU(pkt)
+                        self.broadcastLSU(self.pwospf.interfaces, pkt=pkt, srcPort=pkt[CPUMetadata].srcPort, srcIp=pkt[IP].src)
             elif pkt[CPUMetadata].type == TYPE_DIRECT:
                 if pkt[IP].proto == IP_PROTO_ICMP:
                     assert ICMP in pkt, "ICMP packets should have ICMP layer"
                     if pkt[ICMP].type == ICMP_T_ECHO_REQ:
                         self.createICMPEchoReply(pkt)
-                elif pkt[IP].proto == IP_PROTO_PWOPSF:
-                    if self.verifyPWOSPF(pkt):
-                        # TODO: Handle packets for PWOSPF LSU
-                        print('Packet for PWOSPF LSU')
 
     def send(self, *args, **override_kwargs):
         pkt = args[0]

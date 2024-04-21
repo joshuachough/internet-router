@@ -1,4 +1,4 @@
-from scapy.fields import ByteField, ShortField, XShortField, IntField, LongField
+from scapy.fields import ByteField, ShortField, XShortField, IntField, XIntField, LongField, PacketListField, IPField
 from scapy.packet import Packet, bind_layers
 from scapy.layers.inet import IP
 from scapy.utils import checksum
@@ -40,32 +40,65 @@ class PWOSPF(Packet):
     
 class HELLO(Packet):
     name = "HELLO"
-    fields_desc = [ IntField("netmask", None),
+    fields_desc = [ XIntField("netmask", None),
                     ShortField("helloint", None),
                     ShortField("padding", 0)]
+    
+class LSA(Packet):
+    name = "LSA"
+    fields_desc = [ IPField("subnet", None),
+                    IPField("mask", None),
+                    IntField("router_id", None)]
+
+class LSU(Packet):
+    name = "LSU"
+    fields_desc = [ ShortField("seq", None),
+                    ShortField("ttl", 64),
+                    IntField("num_ads", None),
+                    PacketListField("ads", [], LSA, count_from=lambda pkt: pkt.num_ads)]
 
 bind_layers(IP, PWOSPF, proto=IP_PROTO_PWOPSF)
 bind_layers(PWOSPF, HELLO, type=PWOSPF_TYPE_HELLO)
+bind_layers(PWOSPF, LSU, type=PWOSPF_TYPE_LSU)
 
 class PWOSPFRouter:
-    def __init__(self, area_id, router_id, lsuint=30, interfaces=[]):
+    def __init__(self, area_id, router_id, lsu_bcast, lsuint=30, interfaces=None):
         self.area_id = area_id
         self.router_id = router_id
         self.lsuint = lsuint
-        self.interfaces = interfaces
+        self.interfaces = [] if interfaces is None else interfaces
 
         self.topodb = Graph()
         self.dijkstra = Dijkstra(self.topodb)
+        self.seq = 0
+
+        self.lsu_bcast_timer = Timer(lsu_bcast, {'router': self}, self.lsuint).start()
 
     def add_interface(self, *args, **kwargs):
         interface = PWOSPFInterface(self, *args, **kwargs)
         self.interfaces.append(interface)
 
-    def find_hello_intf(self, port, netmask, helloint):
+    def find_intf_from_port(self, port):
         for intf in self.interfaces:
-            if intf.port == port and intf.netmask == netmask and intf.helloint == helloint:
+            if intf.port == port:
                 return intf
         return None
+    
+    def get_neighbor_ports(self):
+        ports = []
+        for intf in self.interfaces:
+            if intf.has_neighbor():
+                ports.append(intf.port)
+        return ports
+    
+    def print_interfaces(self):
+        print(f"Router {self.router_id} in area {self.area_id} has the following interfaces:")
+        for intf in self.interfaces:
+            print(f"\tInterface {intf.ip} on port {intf.port}")
+
+    def get_new_seq(self):
+        self.seq += 1
+        return self.seq
 
 class PWOSPFInterface:
     def __init__(self, router, ip, netmask, hello_bcast, helloint=10, port=None, mac=None):
@@ -81,6 +114,11 @@ class PWOSPFInterface:
 
         self.hello_bcast_timer = Timer(hello_bcast, {'intf': self}, self.helloint).start()
 
+        self.seq = 0
+
+    def has_neighbor(self):
+        return len(self.neighbors) > 0
+
     def add_neighbor(self, rid, ip, hello_dead):
         neighbor = PWOSPFNeighbor(self, rid, ip, hello_dead, self.helloint*3)
         self.neighbors.append(neighbor)
@@ -95,6 +133,14 @@ class PWOSPFInterface:
     def remove_neighbor(self, neighbor):
         self.neighbors.remove(neighbor)
         print('Neighbor {} ({}) removed from router {}\'s interface {}'.format(neighbor.router_id, neighbor.ip, self.router_id, self.ip))
+
+    def update_seq(self, seq):
+        self.seq = seq
+
+    def check_seq_stale(self, seq):
+        if seq <= self.seq:
+            return True
+        return False
 
 class PWOSPFNeighbor:
     def __init__(self, intf, router_id, ip, hello_dead, hello_dead_int):
