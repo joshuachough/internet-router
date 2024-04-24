@@ -46,8 +46,8 @@ link = topology["links"][0]
 routers[0].intfs[link["port1"]].config(mac=link["r1mac"], ip=link["r1ip"])
 routers[1].intfs[link["port2"]].config(mac=link["r2mac"], ip=link["r2ip"])
 
-# # Fake route
-# routers[0].insertTableEntry(**RoutingTableEntry(keyIP="10.0.0.4", dstIP="10.0.0.4", port=4, priority=4))
+# Fake route
+routers[0].insertTableEntry(**RoutingTableEntry(keyIP="10.0.0.4", dstIP="10.0.0.4", port=4, priority=4))
 
 # Add local IP rules
 for i, router in enumerate(routers):
@@ -65,52 +65,85 @@ for cpu in cpus:
 
 # CLI(net)
 
-# # Print topology information
-# print('\n----- Printing topology information -----')
-# for i, router in enumerate(routers):
-#     print(router.intfs)
-#     for intf in router.intfs.values():
-#         print(intf.name, intf.MAC(), intf.IP(), intf.prefixLen)
-#     print(controllers[i].name, controllers[i].MAC(), controllers[i].IP())
-#     for host in hosts[i]:
-#         print(host.name, host.MAC(), host.IP())
-# print('')
+# Print topology information
+print('\n----- Printing topology information -----')
+for i, router in enumerate(routers):
+    print('\n+++++ Router {} topology +++++'.format(router.name))
+    print(router.intfs)
+    for intf in router.intfs.values():
+        print(intf.name, intf.MAC(), intf.IP(), intf.prefixLen)
+    print(controllers[i].name, controllers[i].MAC(), controllers[i].IP())
+    for host in hosts[i]:
+        print(host.name, host.MAC(), host.IP())
 
-# TODO: organize for testing presentation
+def printTables(routers):
+    for router in routers:
+        router.printTableEntries()
+    print('\n')
 
-# print(hosts[0][0].cmd("arping -c1 10.0.0.3"))
+# Testing
+print('\n******************** Running router tests ********************\n')
 
-# # Ping other hosts
-# print(hosts[0][1].cmd("ping -c1 10.0.2.1"))
-# print(hosts[0][1].cmd("ping -c1 10.0.4.1"))
-time.sleep(11)
-print(hosts[0][1].cmd("ping -c1 10.0.5.1"))
+h2, h3, h5 = hosts[0][0], hosts[0][1], hosts[1][0]
 
-# # Ping router controllers
-# print(hosts[0][1].cmd("ping -c1 10.0.0.1"))
-# print(hosts[1][0].cmd("ping -c1 10.0.4.1"))
+# ARP requests
+print('\n========== ARP requests ==========\n')
+printTables(routers)
+print('\nh2:', h2.cmd("arping -c1 10.0.3.1"))
+print('h3:', h3.cmd("arping -c1 10.0.2.1"))
+print('h5:', h5.cmd("arping -c1 10.0.4.1"))
+printTables(routers)
 
-# # Ping fake route in routing table
-# print(hosts[0][1].cmd("ping -c1 10.0.0.4"))
+# Ping other hosts
+print('\n========== Ping other hosts ==========\n')
+printTables(routers)
+print('\nh2:', h2.cmd("ping -c1 10.0.3.1"))
+print('h3:', h3.cmd("ping -c1 10.0.2.1"))
+printTables(routers)
 
-# # Ping route that doesn't exist
-# print(hosts[0][1].cmd("ping -c1 10.0.0.5"))
+# Ping other hosts across routers
+print('Waiting for LSU broadcast...')
+time.sleep(15)
+print('\n========== Ping other hosts across routers ==========\n')
+printTables(routers)
+print('\nh2:', h2.cmd("ping -c1 10.0.5.1"))
+print('h5:', h5.cmd("ping -c1 10.0.2.1"))
+printTables(routers)
 
-# for router in routers:
-#     router.printTableEntries()
+# Ping router controllers
+print('\n========== Ping router controllers ==========\n')
+printTables(routers)
+print('\nh2:', h2.cmd("ping -c1 10.0.0.1"))
+print('h3:', h3.cmd("ping -c1 10.0.0.1"))
+print('h5:', h5.cmd("ping -c1 10.0.4.1"))
+printTables(routers)
 
-# # Print packet counters
-# print('\n----- Printing r1 packetCounters -----')
-# packet_count, byte_count = r1.readCounter('packetCounters', ARP_COUNTER)
-# print("ARP_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
-# packet_count, byte_count = r1.readCounter('packetCounters', IP_COUNTER)
-# print("IP_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
-# packet_count, byte_count = r1.readCounter('packetCounters', CTRL_COUNTER)
-# print("CTRL_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
-# print('\n----- Printing r2 packetCounters -----')
-# packet_count, byte_count = r2.readCounter('packetCounters', ARP_COUNTER)
-# print("ARP_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
-# packet_count, byte_count = r2.readCounter('packetCounters', IP_COUNTER)
-# print("IP_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
-# packet_count, byte_count = r2.readCounter('packetCounters', CTRL_COUNTER)
-# print("CTRL_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
+# Ping fake route in routing table
+print('\n========== Ping fake route in routing table ==========\n')
+printTables(routers)
+print('\nh2:', h2.cmd("ping -c1 10.0.0.4"))
+printTables(routers)
+
+# Ping route that doesn't exist
+print('\n========== Ping route that doesn\'t exist ==========\n')
+printTables(routers)
+print('\nh2:', h2.cmd("ping -c1 10.0.0.5"))
+printTables(routers)
+
+# Print packet counters
+r1, r2 = routers[0], routers[1]
+print('\n========== Printing r1 packetCounters ==========')
+packet_count, byte_count = r1.readCounter('packetCounters', ARP_COUNTER)
+print("ARP_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
+packet_count, byte_count = r1.readCounter('packetCounters', IP_COUNTER)
+print("IP_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
+packet_count, byte_count = r1.readCounter('packetCounters', CTRL_COUNTER)
+print("CTRL_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
+print('\n========== Printing r2 packetCounters ==========')
+packet_count, byte_count = r2.readCounter('packetCounters', ARP_COUNTER)
+print("ARP_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
+packet_count, byte_count = r2.readCounter('packetCounters', IP_COUNTER)
+print("IP_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
+packet_count, byte_count = r2.readCounter('packetCounters', CTRL_COUNTER)
+print("CTRL_COUNTER: {} packets, {} bytes".format(packet_count, byte_count))
+print('\n')
